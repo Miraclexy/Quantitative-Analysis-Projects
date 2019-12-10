@@ -1,25 +1,27 @@
-#!/usr/bin/env python
-# coding: utf-8
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Created on Thu Dec  5 22:44:37 2019
 
-# In[17]:
+@author: yi
+"""
 
-
-from quantopian.pipeline import Pipeline
-from quantopian.research import run_pipeline
-from quantopian.pipeline.data.builtin import USEquityPricing
-from quantopian.pipeline.factors import SimpleMovingAverage
-from quantopian.pipeline.filters.morningstar import Q500US
+from zipline.api import *  
+from zipline.pipeline import Pipeline
+#from quantopian.research import run_pipeline
+from zipline.pipeline.engine import PipelineEngine
+from zipline.pipeline.data import USEquityPricing
+from zipline.pipeline.filters.morningstar import Q500US
+# sector data is not open source, should use quantopian platform to retrieve
 from quantopian.pipeline.data.morningstar import Fundamentals
+# not open source
 from quantopian.pipeline.classifiers.morningstar import Sector
-from quantopian.pipeline.filters import StaticAssets
+from zipline.pipeline.filters import StaticAssets
 import pandas as pd
 import numpy as np
 import statsmodels.api as sm
 from statsmodels.tsa.arima_model import ARIMA
 import matplotlib.pyplot as plt
-
-
-# In[18]:
 
 
 # get S&P500 components data
@@ -34,31 +36,25 @@ def make_pipeline():
 
 data = run_pipeline(make_pipeline(),'2008-01-01','2019-11-01')
 
-
-# In[19]:
-
-
 data.index = data.index.rename(['date','equity'])
 data['stock'] = [str(i) for i in data.index.get_level_values('equity')]
 
-
-# MORNINGSTAR_SECTOR_CODES = {  
-#      -1: 'Misc',  
-#     101: 'Basic Materials',  
-#     102: 'Consumer Cyclical',  
-#     103: 'Financial Services',  
-#     104: 'Real Estate',  
-#     205: 'Consumer Defensive',  
-#     206: 'Healthcare',  
-#     207: 'Utilities',  
-#     308: 'Communication Services',  
-#     309: 'Energy',  
-#     310: 'Industrials',  
-#     311: 'Technology' ,  
-# }
-
-# In[20]:
-
+'''sector code
+MORNINGSTAR_SECTOR_CODES = {
+-1: 'Misc',
+101: 'Basic Materials',
+102: 'Consumer Cyclical',
+103: 'Financial Services',
+104: 'Real Estate',
+205: 'Consumer Defensive',
+206: 'Healthcare',
+207: 'Utilities',
+308: 'Communication Services',
+309: 'Energy',
+310: 'Industrials',
+311: 'Technology' ,
+}
+'''
 
 # get S&P 500 ETF data
 etfs = (StaticAssets(symbols([
@@ -83,47 +79,21 @@ pipe = Pipeline(
 ETF = run_pipeline(pipe, '2008-01-01', '2019-11-01')
 ETF.index = ETF.index.rename(['date','equity'])
 
-
-# In[21]:
-
-
 # map the sector of ETF with the sector of S&P500 components
-mapping = {'XLB':101,'XLE':309,'XLF':103,'XLI':310,'XLK':311,'XLP':205,'XLU':207,'XLV':206,            'XLY':102,'IYZ':208,'IYR':104}
+mapping = {'XLB':101,'XLE':309,'XLF':103,'XLI':310,'XLK':311,'XLP':205,'XLU':207,'XLV':206, \
+           'XLY':102,'IYZ':208,'IYR':104}
 
 ETF['equity'] = [str(i)[14:17] for i in ETF.index.get_level_values('equity')]
 ETF['sector'] = ETF['equity'].map(mapping)
 
-
-# In[22]:
-
-
 ETF.index = pd.MultiIndex.droplevel(ETF.index,level=1) 
-ETF.head()
-
-
-# In[23]:
-
-
 data.index = pd.MultiIndex.droplevel(data.index,level=1) 
-data.head()
 
-
-# In[24]:
-
-
+# use copy of data later
 newdata = data.copy()
-newdata.head()
-
-
-# In[25]:
-
-
 newetf = ETF.copy()
-newetf.head()
 
-
-# In[26]:
-
+#%%
 
 # Basic Materials: XLB  
 XLB = newdata[['close','stock']][newdata['sector']==101]
@@ -168,10 +138,9 @@ res_xlb['etf'] = etf_xlb['returns']
 res_xlb = res_xlb.stack()
 
 res_xlb['residual'] = res_xlb.returns-res_xlb.beta*res_xlb.etf
-res_xlb.head()
 
 
-# In[27]:
+#==============================================================================
 
 
 # test data in order to get parameters in O-U process
@@ -232,12 +201,9 @@ res_xlb2['sigma'] = np.sqrt(res_xlb2.varepsilon/(1-res_xlb2.b**2))
 # calculate s_score
 res_xlb['s_score'] = (res_xlb2.residual-res_xlb2.m)/res_xlb2.sigma
 res_xlb = res_xlb[res_xlb.index.get_level_values('date')>='2010-01-01']
-res_xlb.head()   
 
 
-# In[28]:
-
-
+#%%
 # define strategy, find time to change position based on s_score
 def strategy(data, S_bo, S_so, S_bc, S_sc):
     '''
@@ -303,133 +269,20 @@ def strategy(data, S_bo, S_so, S_bc, S_sc):
     datas = datas.reset_index(drop=True)
     datas['returns'] = datas.close.pct_change(1).shift(-1).fillna(0)
     datas['cumulative_ret'] = (1+datas.returns * datas.position).cumprod()
-#    datas['benchmark'] = datas.close/datas.close[0]
     datas['benchmark'] = (1+datas.returns * np.mean(datas.beta)).cumprod()
+    datas['benchmark2'] = (1+datas.returns * np.std(datas.returns * datas.position) \
+         /np.std(datas.returns)).cumprod()
+    
     
     return datas, transaction
-
-
-# In[17]:
-
-
-# show performance
-def performance(transaction, strategy):
-    import matplotlib.pyplot as plt
-    '''
-    parameters
-        transaction: transaction information we got from 'strategy' function
-        strategy: strategy information we got from 'strategy' function
-    '''
-    N = 252 # 252 trading days in one year
-    # compute annualized return
-    annual_return = strategy.cumulative_ret[strategy.shape[0]-1] ** (N/strategy.shape[0]) - 1
-    # compute Sharpe Ratio
-    sharpe = (strategy.returns * strategy.position).mean() /               (strategy.returns * strategy.position).std() * np.sqrt(N)
-    # compute victory ratios
-    victory_ratio = (transaction.sellprice > transaction.buyprice).mean()
-    # compute maximun drop down
-    maxdropdown = (1-strategy.cumulative_ret / strategy.cumulative_ret.cummax()).max()
-    # compute max loss for every trading
-    maxloss = min(transaction.sellprice / transaction.buyprice-1) 
+  
+#%%
     
-    # compute annulized performance of strategy
-    strategy['year'] = strategy.date.apply(lambda x:str(x)[0:4])
-    # compute cumulative return per year
-    cumulative_ret_peryear = strategy.cumulative_ret.groupby(strategy.year).last()             / strategy.cumulative_ret.groupby(strategy.year).first() -1
-    # compute benchmark return per year
-    benchmark_peryear = strategy.benchmark.groupby(strategy.year).last() /                 strategy.benchmark.groupby(strategy.year).first() - 1
-    # compute excessive return per year
-    excess_peryear = cumulative_ret_peryear - benchmark_peryear
-    # concat the three returns
-    result_peryear = pd.concat([cumulative_ret_peryear,benchmark_peryear,                                 excess_peryear], axis = 1)
-    result_peryear.columns = ['strategy_return','benchmark_return','excessive_return']  
-    
-    
-    strategy.set_index('date',inplace=True)
-    strategy.index = pd.to_datetime(strategy.index)
-    # plot the result
-    #plt.rcParams['figure.figsize'] = (14,12)
-    plt.subplot(211)
-    plt.plot(strategy.cumulative_ret,label='strategy')
-    plt.plot(strategy.benchmark,label='benchmark')
-    plt.legend(loc='upper left',fontsize=15)
-    plt.title('Cumulative returns',fontsize=20)
-    plt.subplot(212)
-    plt.plot(result_peryear.strategy_return,label='strategy')
-    plt.plot(result_peryear.benchmark_return,label='benchmark')
-    plt.plot(result_peryear.excessive_return,label='excessive')
-    plt.legend(loc='upper left',fontsize=15)
-    plt.title('Yearly cumulative return',fontsize=20)
-    
-    
-    
-    print('-------------------------------------------')
-#     print('Sharpe Ratio:',round(sharpe,2))
-#     print('Annualized return:{}%'.format(round(annual_return*100,2)))
-#     print('Victory Ratio:{}%'.format(round(victory_ratio*100,2)))
-#     print('Maximum drop down:{}%'.format(round(maxdropdown,2)))
-#     print('Maximun loss for one single trading:{}%'.format(round(-maxloss*100,2)))
-#     print('Monthly average trading times:{}'.format(round( \
-#           strategy.flag.abs().sum()/strategy.shape[0]*30,2)))
-    
-    result = {'Sharpe_ratio':sharpe,
-              'Annualized_return':annual_return,
-              'Victory_ratio':victory_ratio,
-              'Max_drop_down':maxdropdown,
-              'MaxlossOnce':-1*maxloss,
-              'Average_trade_num':round(strategy.flag.abs().sum()/strategy.shape[0],1)
-              }
-    result = pd.DataFrame.from_dict(result,orient='index').T
-    
-    return result, result_peryear
-
-
-# test for one stock
-
-# In[18]:
-
-
-test = res_xlb[res_xlb.index.get_level_values('stock')=='Equity(13197 [FCX])']
-test = test[['close','beta','s_score']]
-test.index = pd.MultiIndex.droplevel(test.index,level=1)
-test = test.reset_index()
-test.head()
-
-
-# In[19]:
-
-
-strategyres, transaction = strategy(test,1.25,1.25,0.75,0.5)
-finalresult, yearlyresult = performance(transaction,strategyres)
-
-
-# In[20]:
-
-
-strategyres.head()
-
-
-# In[21]:
-
-
-res_xlb.head()
-
-
-# In[22]:
-
-
-transaction.head()
-
-
-# In[29]:
-
-
-# strategyres_xlb = pd.DataFrame()
-# transaction_xlb = pd.DataFrame()
-cumulativeret_xlb = pd.DataFrame(index = res_xlb.unstack().index,columns=['cum_ret','benchmark'])
+cumulativeret_xlb = pd.DataFrame(index = res_xlb.unstack().index, \
+                                 columns=['cum_ret','benchmark','benchmark2'])
 cumulativeret_xlb['cum_ret'] = 0
 cumulativeret_xlb['benchmark'] = 0
-
+cumulativeret_xlb['benchmark2'] = 0
 
 for stock in set(res_xlb.index.get_level_values('stock')):
     cur = res_xlb[['close','beta','s_score']][res_xlb.index.get_level_values('stock')==stock]
@@ -437,42 +290,18 @@ for stock in set(res_xlb.index.get_level_values('stock')):
     cur = cur.reset_index()
 
     strategyres, transaction = strategy(cur,0.1,0.1,-0.15,-0.2)
-#    finalresult, yearlyresult = performance(transaction,strategyres)
+
     strategyres.set_index(strategyres['date'],inplace=True)
     cumulativeret_xlb['temp1'] = strategyres['cumulative_ret']
     cumulativeret_xlb['cum_ret'] += cumulativeret_xlb['temp1']
     cumulativeret_xlb['temp2'] = strategyres['benchmark']
-    cumulativeret_xlb['benchmark'] += cumulativeret_xlb['temp2']
-    
-    
-#     strategyres_xlb = pd.concat([strategyres_xlb,strategyres])
-#     transaction_xlb = pd.concat([transaction_xlb,transaction])
-    
-    
+    cumulativeret_xlb['benchmark'] += cumulativeret_xlb['temp2'] 
+    cumulativeret_xlb['temp3'] = strategyres['benchmark2']
+    cumulativeret_xlb['benchmark2'] += cumulativeret_xlb['temp3']
     
 cumulativeret_xlb['cum_ret'] /= len(set(res_xlb.index.get_level_values('stock')))
 cumulativeret_xlb['benchmark'] /= len(set(res_xlb.index.get_level_values('stock')))
-
-
-# In[36]:
-
-
-etf_xlb[etf_xlb.index>="2010-01-01"].head()
-
-
-# In[14]:
-
-
-np.std(res_xlb.s_score)
-
-
-# In[33]:
-
-
-cumulativeret_xlb.head()
-
-
-# In[39]:
+cumulativeret_xlb['benchmark2'] /= len(set(res_xlb.index.get_level_values('stock')))
 
 
 etf_xlb2 = etf_xlb.copy()[etf_xlb.index>="2010-01-01"]
@@ -480,16 +309,12 @@ etf_xlb2['cum_ret'] = (1+etf_xlb2.returns*np.mean(res_xlb.beta)).cumprod()
 
 plt.plot(cumulativeret_xlb['cum_ret'],label="cumulative returns")
 plt.plot(cumulativeret_xlb['benchmark'],label="benchmark returns")
+plt.plot(cumulativeret_xlb['benchmark2'],label="benchmark returns2")
 plt.plot(etf_xlb2['cum_ret'],label="ETF returns")
 plt.legend(loc='upper left',fontsize=15)
 plt.title('Basic Materials: XLB',fontsize=20)
 
-
-# Consumer Cyclical: XLY 
-
-# In[40]:
-
-
+#%%
 # Consumer Cyclical: XLY 
 XLY = newdata[['close','stock']][newdata['sector']==102]
 etf_xly = newetf[['close']][newetf['sector']==102]
@@ -585,10 +410,11 @@ res_xly = res_xly[res_xly.index.get_level_values('date')>='2010-01-01']
 
 
 # begin strategy
-cumulativeret_xly = pd.DataFrame(index = res_xly.unstack().index,columns=['cum_ret','benchmark'])
+cumulativeret_xly = pd.DataFrame(index = res_xly.unstack().index,columns= \
+                                 ['cum_ret','benchmark','benchmark2'])
 cumulativeret_xly['cum_ret'] = 0
 cumulativeret_xly['benchmark'] = 0
-
+cumulativeret_xly['benchmark2'] = 0
 
 for stock in set(res_xly.index.get_level_values('stock')):
     cur = res_xly[['close','beta','s_score']][res_xly.index.get_level_values('stock')==stock]
@@ -602,26 +428,24 @@ for stock in set(res_xly.index.get_level_values('stock')):
     cumulativeret_xly['cum_ret'] += cumulativeret_xly['temp1']
     cumulativeret_xly['temp2'] = strategyres['benchmark']
     cumulativeret_xly['benchmark'] += cumulativeret_xly['temp2']
-    
+    cumulativeret_xly['temp3'] = strategyres['benchmark2']
+    cumulativeret_xly['benchmark2'] += cumulativeret_xly['temp3']
             
 cumulativeret_xly['cum_ret'] /= len(set(res_xly.index.get_level_values('stock')))
 cumulativeret_xly['benchmark'] /= len(set(res_xly.index.get_level_values('stock')))
+cumulativeret_xly['benchmark2'] /= len(set(res_xly.index.get_level_values('stock')))
 
 etf_xly2 = etf_xly.copy()[etf_xly.index>="2010-01-01"]
 etf_xly2['cum_ret'] = (1+etf_xly2.returns*np.mean(res_xly.beta)).cumprod()
 # plot cumulative returns
 plt.plot(cumulativeret_xly['cum_ret'],label="cumulative_returns")
 plt.plot(cumulativeret_xly['benchmark'],label="benchmark returns")
+plt.plot(cumulativeret_xly['benchmark2'],label="benchmark returns2")
 plt.plot(etf_xly2['cum_ret'],label='ETF returns')
 plt.legend(loc='upper left',fontsize=15)
 plt.title('Consumer Cyclical: XLY ',fontsize=20)
 
-
-# Financial Services: XLF
-
-# In[41]:
-
-
+#%%
 # Financial Services: XLF
 XLF = newdata[['close','stock']][newdata['sector']==103]
 etf_xlf = newetf[['close']][newetf['sector']==103]
@@ -717,10 +541,10 @@ res_xlf = res_xlf[res_xlf.index.get_level_values('date')>='2010-01-01']
 
 
 # begin strategy
-cumulativeret_xlf = pd.DataFrame(index = res_xlf.unstack().index,columns=['cum_ret','benchmark'])
+cumulativeret_xlf = pd.DataFrame(index = res_xlf.unstack().index,columns=['cum_ret','benchmark','benchmark2'])
 cumulativeret_xlf['cum_ret'] = 0
 cumulativeret_xlf['benchmark'] = 0
-
+cumulativeret_xlf['benchmark2'] = 0
 
 for stock in set(res_xlf.index.get_level_values('stock')):
     cur = res_xlf[['close','beta','s_score']][res_xlf.index.get_level_values('stock')==stock]
@@ -734,27 +558,24 @@ for stock in set(res_xlf.index.get_level_values('stock')):
     cumulativeret_xlf['cum_ret'] += cumulativeret_xlf['temp1']
     cumulativeret_xlf['temp2'] = strategyres['benchmark']
     cumulativeret_xlf['benchmark'] += cumulativeret_xlf['temp2']
-    
+    cumulativeret_xlf['temp3'] = strategyres['benchmark2']
+    cumulativeret_xlf['benchmark2'] += cumulativeret_xlf['temp3']
             
 cumulativeret_xlf['cum_ret'] /= len(set(res_xlf.index.get_level_values('stock')))
 cumulativeret_xlf['benchmark'] /= len(set(res_xlf.index.get_level_values('stock')))
-
+cumulativeret_xlf['benchmark2'] /= len(set(res_xlf.index.get_level_values('stock')))
 
 etf_xlf2 = etf_xlf.copy()[etf_xlf.index>="2010-01-01"]
 etf_xlf2['cum_ret'] = (1+etf_xlf2.returns*np.mean(res_xlf.beta)).cumprod()
 # plot cumulative returns
 plt.plot(cumulativeret_xlf['cum_ret'],label="cumulative_returns")
 plt.plot(cumulativeret_xlf['benchmark'],label="benchmark returns")
+plt.plot(cumulativeret_xlf['benchmark2'],label="benchmark returns2")
 plt.plot(etf_xlf2['cum_ret'],label='ETF returns')
 plt.legend(loc='upper left',fontsize=15)
 plt.title('Financial Services: XLF',fontsize=20)
 
-
-# Real Estate: IYR  
-
-# In[43]:
-
-
+#%%
 # Real Estate: IYR
 IYR = newdata[['close','stock']][newdata['sector']==104]
 etf_iyr = newetf[['close']][newetf['sector']==104]
@@ -850,10 +671,10 @@ res_iyr = res_iyr[res_iyr.index.get_level_values('date')>='2010-01-01']
 
 
 # begin strategy
-cumulativeret_iyr = pd.DataFrame(index = res_iyr.unstack().index,columns=['cum_ret','benchmark'])
+cumulativeret_iyr = pd.DataFrame(index = res_iyr.unstack().index,columns=['cum_ret','benchmark','benchmark2'])
 cumulativeret_iyr['cum_ret'] = 0
 cumulativeret_iyr['benchmark'] = 0
-
+cumulativeret_iyr['benchmark2'] = 0
 
 for stock in set(res_iyr.index.get_level_values('stock')):
     cur = res_iyr[['close','beta','s_score']][res_iyr.index.get_level_values('stock')==stock]
@@ -867,27 +688,24 @@ for stock in set(res_iyr.index.get_level_values('stock')):
     cumulativeret_iyr['cum_ret'] += cumulativeret_iyr['temp1']
     cumulativeret_iyr['temp2'] = strategyres['benchmark']
     cumulativeret_iyr['benchmark'] += cumulativeret_iyr['temp2']
-    
+    cumulativeret_iyr['temp3'] = strategyres['benchmark2']
+    cumulativeret_iyr['benchmark2'] += cumulativeret_iyr['temp3']
             
 cumulativeret_iyr['cum_ret'] /= len(set(res_iyr.index.get_level_values('stock')))
 cumulativeret_iyr['benchmark'] /= len(set(res_iyr.index.get_level_values('stock')))
-
+cumulativeret_iyr['benchmark2'] /= len(set(res_iyr.index.get_level_values('stock')))
 
 etf_iyr2 = etf_iyr.copy()[etf_iyr.index>="2010-01-01"]
 etf_iyr2['cum_ret'] = (1+etf_iyr2.returns*np.mean(res_iyr.beta)).cumprod()
 # plot cumulative returns
 plt.plot(cumulativeret_iyr['cum_ret'],label="cumulative_returns")
 plt.plot(cumulativeret_iyr['benchmark'],label="benchmark returns")
+plt.plot(cumulativeret_iyr['benchmark2'],label="benchmark returns2")
 plt.plot(etf_iyr2['cum_ret'],label='ETF returns')
 plt.legend(loc='upper left',fontsize=15)
 plt.title('Real Estate: IYR',fontsize=20)
 
-
-# Consumer Defensive: XLP  
-
-# In[48]:
-
-
+#%%
 # Consumer Defensive: XLP  
 XLP = newdata[['close','stock']][newdata['sector']==205]
 etf_xlp = newetf[['close']][newetf['sector']==205]
@@ -983,9 +801,10 @@ res_xlp = res_xlp[res_xlp.index.get_level_values('date')>='2010-01-01']
 
 
 # begin strategy
-cumulativeret_xlp = pd.DataFrame(index = res_xlp.unstack().index,columns=['cum_ret','benchmark'])
+cumulativeret_xlp = pd.DataFrame(index = res_xlp.unstack().index,columns=['cum_ret','benchmark','benchmark2'])
 cumulativeret_xlp['cum_ret'] = 0
 cumulativeret_xlp['benchmark'] = 0
+cumulativeret_xlp['benchmark2'] = 0
 
 
 for stock in set(res_xlp.index.get_level_values('stock')):
@@ -1000,27 +819,24 @@ for stock in set(res_xlp.index.get_level_values('stock')):
     cumulativeret_xlp['cum_ret'] += cumulativeret_xlp['temp1']
     cumulativeret_xlp['temp2'] = strategyres['benchmark']
     cumulativeret_xlp['benchmark'] += cumulativeret_xlp['temp2']
-    
+    cumulativeret_xlp['temp3'] = strategyres['benchmark2']
+    cumulativeret_xlp['benchmark2'] += cumulativeret_xlp['temp3']
             
 cumulativeret_xlp['cum_ret'] /= len(set(res_xlp.index.get_level_values('stock')))
 cumulativeret_xlp['benchmark'] /= len(set(res_xlp.index.get_level_values('stock')))
-
+cumulativeret_xlp['benchmark2'] /= len(set(res_xlp.index.get_level_values('stock')))
 
 etf_xlp2 = etf_xlp.copy()[etf_xlp.index>="2010-01-01"]
 etf_xlp2['cum_ret'] = (1+etf_xlp2.returns*np.mean(res_xlp.beta)).cumprod()
 # plot cumulative returns
 plt.plot(cumulativeret_xlp['cum_ret'],label="cumulative_returns")
 plt.plot(cumulativeret_xlp['benchmark'],label="benchmark returns")
+plt.plot(cumulativeret_xlp['benchmark2'],label="benchmark returns2")
 plt.plot(etf_xlp2['cum_ret'],label='ETF returns')
 plt.legend(loc='upper left',fontsize=15)
 plt.title('Consumer Defensive: XLP',fontsize=20) 
 
-
-# Healthcare: XLV
-
-# In[49]:
-
-
+#%%
 # Healthcare: XLV  
 XLV = newdata[['close','stock']][newdata['sector']==206]
 etf_xlv = newetf[['close']][newetf['sector']==206]
@@ -1116,10 +932,10 @@ res_xlv = res_xlv[res_xlv.index.get_level_values('date')>='2010-01-01']
 
 
 # begin strategy
-cumulativeret_xlv = pd.DataFrame(index = res_xlv.unstack().index,columns=['cum_ret','benchmark'])
+cumulativeret_xlv = pd.DataFrame(index = res_xlv.unstack().index,columns=['cum_ret','benchmark','benchmark2'])
 cumulativeret_xlv['cum_ret'] = 0
 cumulativeret_xlv['benchmark'] = 0
-
+cumulativeret_xlv['benchmark2'] = 0
 
 for stock in set(res_xlv.index.get_level_values('stock')):
     cur = res_xlv[['close','beta','s_score']][res_xlv.index.get_level_values('stock')==stock]
@@ -1133,27 +949,24 @@ for stock in set(res_xlv.index.get_level_values('stock')):
     cumulativeret_xlv['cum_ret'] += cumulativeret_xlv['temp1']
     cumulativeret_xlv['temp2'] = strategyres['benchmark']
     cumulativeret_xlv['benchmark'] += cumulativeret_xlv['temp2']
-    
+    cumulativeret_xlv['temp3'] = strategyres['benchmark2']
+    cumulativeret_xlv['benchmark2'] += cumulativeret_xlv['temp3']
             
 cumulativeret_xlv['cum_ret'] /= len(set(res_xlv.index.get_level_values('stock')))
 cumulativeret_xlv['benchmark'] /= len(set(res_xlv.index.get_level_values('stock')))
-
+cumulativeret_xlv['benchmark2'] /= len(set(res_xlv.index.get_level_values('stock')))
 
 etf_xlv2 = etf_xlv.copy()[etf_xlv.index>="2010-01-01"]
 etf_xlv2['cum_ret'] = (1+etf_xlv2.returns*np.mean(res_xlv.beta)).cumprod()
 # plot cumulative returns
 plt.plot(cumulativeret_xlv['cum_ret'],label="cumulative_returns")
 plt.plot(cumulativeret_xlv['benchmark'],label="benchmark returns")
+plt.plot(cumulativeret_xlv['benchmark2'],label="benchmark returns2")
 plt.plot(etf_xlv2['cum_ret'],label='ETF returns')
 plt.legend(loc='upper left',fontsize=15)
 plt.title('Healthcare: XLV',fontsize=20)
 
-
-# Utilities: XLU
-
-# In[50]:
-
-
+#%%
 # Utilities: XLU 
 XLU = newdata[['close','stock']][newdata['sector']==207]
 etf_xlu = newetf[['close']][newetf['sector']==207]
@@ -1249,10 +1062,10 @@ res_xlu = res_xlu[res_xlu.index.get_level_values('date')>='2010-01-01']
 
 
 # begin strategy
-cumulativeret_xlu = pd.DataFrame(index = res_xlu.unstack().index,columns=['cum_ret','benchmark'])
+cumulativeret_xlu = pd.DataFrame(index = res_xlu.unstack().index,columns=['cum_ret','benchmark','benchmark2'])
 cumulativeret_xlu['cum_ret'] = 0
 cumulativeret_xlu['benchmark'] = 0
-
+cumulativeret_xlu['benchmark2'] = 0
 
 for stock in set(res_xlu.index.get_level_values('stock')):
     cur = res_xlu[['close','beta','s_score']][res_xlu.index.get_level_values('stock')==stock]
@@ -1266,29 +1079,25 @@ for stock in set(res_xlu.index.get_level_values('stock')):
     cumulativeret_xlu['cum_ret'] += cumulativeret_xlu['temp1']
     cumulativeret_xlu['temp2'] = strategyres['benchmark']
     cumulativeret_xlu['benchmark'] += cumulativeret_xlu['temp2']
-    
+    cumulativeret_xlu['temp3'] = strategyres['benchmark2']
+    cumulativeret_xlu['benchmark2'] += cumulativeret_xlu['temp3']    
             
 cumulativeret_xlu['cum_ret'] /= len(set(res_xlu.index.get_level_values('stock')))
 cumulativeret_xlu['benchmark'] /= len(set(res_xlu.index.get_level_values('stock')))
-
+cumulativeret_xlu['benchmark2'] /= len(set(res_xlu.index.get_level_values('stock')))
 
 etf_xlu2 = etf_xlu.copy()[etf_xlu.index>="2010-01-01"]
 etf_xlu2['cum_ret'] = (1+etf_xlu2.returns*np.mean(res_xlu.beta)).cumprod()
 # plot cumulative returns
 plt.plot(cumulativeret_xlu['cum_ret'],label="cumulative_returns")
 plt.plot(cumulativeret_xlu['benchmark'],label="benchmark returns")
+plt.plot(cumulativeret_xlu['benchmark2'],label="benchmark returns2")
 plt.plot(etf_xlu2['cum_ret'],label='ETF returns')
 plt.legend(loc='upper left',fontsize=15)
 plt.title('Utilities: XLU',fontsize=20)
 
-
+#%%
 # Communication Services: IYZ (do not have ETF data)
-
-# Energy: XLE
-
-# In[65]:
-
-
 # Energy: XLE 
 XLE = newdata[['close','stock']][newdata['sector']==309]
 etf_xle = newetf[['close']][newetf['sector']==309]
@@ -1384,10 +1193,10 @@ res_xle = res_xle[res_xle.index.get_level_values('date')>='2010-01-01']
 
 
 # begin strategy
-cumulativeret_xle = pd.DataFrame(index = res_xle.unstack().index,columns=['cum_ret','benchmark'])
+cumulativeret_xle = pd.DataFrame(index = res_xle.unstack().index,columns=['cum_ret','benchmark','benchmark2'])
 cumulativeret_xle['cum_ret'] = 0
 cumulativeret_xle['benchmark'] = 0
-
+cumulativeret_xle['benchmark2'] = 0
 
 for stock in set(res_xle.index.get_level_values('stock')):
     cur = res_xle[['close','beta','s_score']][res_xle.index.get_level_values('stock')==stock]
@@ -1401,27 +1210,24 @@ for stock in set(res_xle.index.get_level_values('stock')):
     cumulativeret_xle['cum_ret'] += cumulativeret_xle['temp1']
     cumulativeret_xle['temp2'] = strategyres['benchmark']
     cumulativeret_xle['benchmark'] += cumulativeret_xle['temp2']
-    
+    cumulativeret_xle['temp3'] = strategyres['benchmark2']
+    cumulativeret_xle['benchmark2'] += cumulativeret_xle['temp3']
             
 cumulativeret_xle['cum_ret'] /= len(set(res_xle.index.get_level_values('stock')))
 cumulativeret_xle['benchmark'] /= len(set(res_xle.index.get_level_values('stock')))
-
+cumulativeret_xle['benchmark2'] /= len(set(res_xle.index.get_level_values('stock')))
 
 etf_xle2 = etf_xle.copy()[etf_xle.index>="2010-01-01"]
 etf_xle2['cum_ret'] = (1+etf_xle2.returns*np.mean(res_xle.beta)).cumprod()
 # plot cumulative returns
 plt.plot(cumulativeret_xle['cum_ret'],label="cumulative_returns")
 plt.plot(cumulativeret_xle['benchmark'],label="benchmark returns")
+plt.plot(cumulativeret_xle['benchmark2'],label="benchmark returns2")
 plt.plot(etf_xle2['cum_ret'],label='ETF returns')
 plt.legend(loc='upper left',fontsize=15)
 plt.title('Energy: XLE',fontsize=20)
 
-
-# Industrials: XLI
-
-# In[66]:
-
-
+#%%
 # Industrials: XLI 
 XLI = newdata[['close','stock']][newdata['sector']==310]
 etf_xli = newetf[['close']][newetf['sector']==310]
@@ -1517,10 +1323,10 @@ res_xli = res_xli[res_xli.index.get_level_values('date')>='2010-01-01']
 
 
 # begin strategy
-cumulativeret_xli = pd.DataFrame(index = res_xli.unstack().index,columns=['cum_ret','benchmark'])
+cumulativeret_xli = pd.DataFrame(index = res_xli.unstack().index,columns=['cum_ret','benchmark','benchmark2'])
 cumulativeret_xli['cum_ret'] = 0
 cumulativeret_xli['benchmark'] = 0
-
+cumulativeret_xli['benchmark2'] = 0
 
 for stock in set(res_xli.index.get_level_values('stock')):
     cur = res_xli[['close','beta','s_score']][res_xli.index.get_level_values('stock')==stock]
@@ -1534,27 +1340,24 @@ for stock in set(res_xli.index.get_level_values('stock')):
     cumulativeret_xli['cum_ret'] += cumulativeret_xli['temp1']
     cumulativeret_xli['temp2'] = strategyres['benchmark']
     cumulativeret_xli['benchmark'] += cumulativeret_xli['temp2']
-    
+    cumulativeret_xli['temp3'] = strategyres['benchmark2']
+    cumulativeret_xli['benchmark2'] += cumulativeret_xli['temp3']    
             
 cumulativeret_xli['cum_ret'] /= len(set(res_xli.index.get_level_values('stock')))
 cumulativeret_xli['benchmark'] /= len(set(res_xli.index.get_level_values('stock')))
-
+cumulativeret_xli['benchmark2'] /= len(set(res_xli.index.get_level_values('stock')))
 
 etf_xli2 = etf_xli.copy()[etf_xli.index>="2010-01-01"]
 etf_xli2['cum_ret'] = (1+etf_xli2.returns*np.mean(res_xli.beta)).cumprod()
 # plot cumulative returns
 plt.plot(cumulativeret_xli['cum_ret'],label="cumulative_returns")
 plt.plot(cumulativeret_xli['benchmark'],label="benchmark returns")
+plt.plot(cumulativeret_xli['benchmark2'],label="benchmark returns2")
 plt.plot(etf_xli2['cum_ret'],label='ETF returns')
 plt.legend(loc='upper left',fontsize=15)
 plt.title('Industrials: XLI',fontsize=20)
 
-
-# Technology: XLK
-
-# In[67]:
-
-
+#%%
 # Technology: XLK 
 XLK = newdata[['close','stock']][newdata['sector']==311]
 etf_xlk = newetf[['close']][newetf['sector']==311]
@@ -1650,10 +1453,10 @@ res_xlk = res_xlk[res_xlk.index.get_level_values('date')>='2010-01-01']
 
 
 # begin strategy
-cumulativeret_xlk = pd.DataFrame(index = res_xlk.unstack().index,columns=['cum_ret','benchmark'])
+cumulativeret_xlk = pd.DataFrame(index = res_xlk.unstack().index,columns=['cum_ret','benchmark','benchmark2'])
 cumulativeret_xlk['cum_ret'] = 0
 cumulativeret_xlk['benchmark'] = 0
-
+cumulativeret_xlk['benchmark2'] = 0
 
 for stock in set(res_xlk.index.get_level_values('stock')):
     cur = res_xlk[['close','beta','s_score']][res_xlk.index.get_level_values('stock')==stock]
@@ -1667,23 +1470,47 @@ for stock in set(res_xlk.index.get_level_values('stock')):
     cumulativeret_xlk['cum_ret'] += cumulativeret_xlk['temp1']
     cumulativeret_xlk['temp2'] = strategyres['benchmark']
     cumulativeret_xlk['benchmark'] += cumulativeret_xlk['temp2']
-    
+    cumulativeret_xlk['temp3'] = strategyres['benchmark2']
+    cumulativeret_xlk['benchmark2'] += cumulativeret_xlk['temp3']  
             
 cumulativeret_xlk['cum_ret'] /= len(set(res_xlk.index.get_level_values('stock')))
 cumulativeret_xlk['benchmark'] /= len(set(res_xlk.index.get_level_values('stock')))
-
+cumulativeret_xlk['benchmark2'] /= len(set(res_xlk.index.get_level_values('stock')))
 
 etf_xlk2 = etf_xlk.copy()[etf_xlk.index>="2010-01-01"]
 etf_xlk2['cum_ret'] = (1+etf_xlk2.returns*np.mean(res_xlk.beta)).cumprod()
 # plot cumulative returns
 plt.plot(cumulativeret_xlk['cum_ret'],label="cumulative_returns")
 plt.plot(cumulativeret_xlk['benchmark'],label="benchmark returns")
+plt.plot(cumulativeret_xlk['benchmark2'],label="benchmark returns2")
 plt.plot(etf_xlk2['cum_ret'],label='ETF returns')
 plt.legend(loc='upper left',fontsize=15)
 plt.title('Technology: XLK',fontsize=20)
 
+#%%
 
-# In[ ]:
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
