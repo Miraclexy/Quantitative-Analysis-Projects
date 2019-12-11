@@ -20,8 +20,13 @@ initiated Kalman Filter model to optimize performance of HMM model by solving th
 
 Divide stock pool of S&P500 components into different groups based on sectors.
 For each sector:
+
 (1): use ETF in this sector as market risk factor
+
 (2): use stocks’ daily returns data to do OLS regression on corresponding ETF’s daily returns; get correlation beta and residual. Assume that the residual we get in the last process follows mean reverting O-U process, so we use test data to get the parameters in O-U process. In discrete time, O-U process becomes AR(1) model, so in practice, we use AR(1) model.
+
 (3): use test data in order to get parameters in O-U process and get s_score which is the trading signal.
+
 (4): define trading strategy. Calculate cumulative returns and benchmark’s cumulative returns.
+
 (5) plot the cumulative returns.
