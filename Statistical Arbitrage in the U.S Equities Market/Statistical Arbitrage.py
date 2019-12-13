@@ -276,13 +276,80 @@ def strategy(data, S_bo, S_so, S_bc, S_sc):
     
     return datas, transaction
   
-#%%
     
-cumulativeret_xlb = pd.DataFrame(index = res_xlb.unstack().index, \
-                                 columns=['cum_ret','benchmark','benchmark2'])
+
+# show performance
+def performance(transaction, strategy):
+    '''
+    parameters
+        transaction: transaction information we got from 'strategy' function
+        strategy: strategy information we got from 'strategy' function
+    '''
+    N = 252.0 # 252 trading days in one year
+    # compute annualized return
+    annual_return = float(strategy.cumulative_ret[strategy.shape[0]-1]) ** (N/strategy.shape[0]) - 1
+    # compute Sharpe Ratio
+    sharpe = (strategy.returns * strategy.position).mean() /  \
+             (strategy.returns * strategy.position).std() * np.sqrt(N)
+    # compute victory ratios
+    victory_ratio = (transaction.sellprice > transaction.buyprice).mean()
+    # compute maximun drop down
+    maxdropdown = (1-strategy.cumulative_ret / strategy.cumulative_ret.cummax()).max()
+    # compute max loss for every trading
+    maxloss = min(transaction.sellprice / transaction.buyprice-1) 
+    
+    # compute annulized performance of strategy
+    strategy['year'] = strategy.date.apply(lambda x:str(x)[0:4])
+    # compute cumulative return per year
+    cumulative_ret_peryear = strategy.cumulative_ret.groupby(strategy.year).last() \
+            / strategy.cumulative_ret.groupby(strategy.year).first() -1
+    # compute benchmark return per year
+    benchmark_peryear = strategy.benchmark.groupby(strategy.year).last() / \
+                strategy.benchmark.groupby(strategy.year).first() - 1
+    # compute excessive return per year
+    excess_peryear = cumulative_ret_peryear - benchmark_peryear
+    # concat the three returns
+    result_peryear = pd.concat([cumulative_ret_peryear,benchmark_peryear, \
+                                excess_peryear], axis = 1)
+    result_peryear.columns = ['strategy_return','benchmark_return','excessive_return']  
+    
+       
+    strategy.set_index('date',inplace=True)
+    strategy.index = pd.to_datetime(strategy.index)
+    
+    
+    result = {'Sharpe_ratio':sharpe,
+              'Annualized_return':annual_return,
+              'Victory_ratio':victory_ratio,
+              'Max_drop_down':maxdropdown,
+              'MaxlossOnce':-1*maxloss,
+              'Average_trade_num':round(strategy.flag.abs().sum()/strategy.shape[0],1)
+              }
+    result = pd.DataFrame.from_dict(result,orient='index').T
+    
+    return result, result_peryear
+
+#%%
+
+# percentage of stock whose s_score reaches 0.1, which is our open position point
+float(len(res_xlb.s_score[res_xlb.s_score>0.1]))/len(res_xlb.s_score) # 0.4
+
+
+cumulativeret_xlb = pd.DataFrame(index = res_xlb.unstack().index, 、
+                    columns=['returns','cum_ret','benchmark','benchmark2'])
+cumulativeret_xlb['returns'] = 0
 cumulativeret_xlb['cum_ret'] = 0
 cumulativeret_xlb['benchmark'] = 0
 cumulativeret_xlb['benchmark2'] = 0
+finalresult_xlb = pd.DataFrame(index = ['strategy'], 、
+    columns=['Average_trade_num','MaxlossOnce','Max_drop_down','Victory_ratio', \
+                                        'Sharpe_ratio','Annualized_return'])
+finalresult_xlb['Average_trade_num'] = 0
+finalresult_xlb['MaxlossOnce'] = 0
+finalresult_xlb['Max_drop_down'] = 0
+finalresult_xlb['Victory_ratio'] = 0
+finalresult_xlb['Sharpe_ratio'] = 0
+finalresult_xlb['Annualized_return'] = 0
 
 for stock in set(res_xlb.index.get_level_values('stock')):
     cur = res_xlb[['close','beta','s_score']][res_xlb.index.get_level_values('stock')==stock]
@@ -290,20 +357,57 @@ for stock in set(res_xlb.index.get_level_values('stock')):
     cur = cur.reset_index()
 
     strategyres, transaction = strategy(cur,0.1,0.1,-0.15,-0.2)
-
-    strategyres.set_index(strategyres['date'],inplace=True)
+    finalres, yearlyres = performance(transaction, strategyres)
+    finalresult_xlb['Average_trade_num'] += finalres['Average_trade_num'][0]
+    finalresult_xlb['MaxlossOnce'] = max(finalresult_xlb.MaxlossOnce[0], 、
+                  finalres.MaxlossOnce[0])
+    finalresult_xlb['Max_drop_down'] = max(finalresult_xlb.Max_drop_down[0], 、
+                   finalres.Max_drop_down[0])
+    finalresult_xlb['Victory_ratio'] += finalres['Victory_ratio'][0]
+    finalresult_xlb['Sharpe_ratio'] += finalres['Sharpe_ratio'][0]
+    finalresult_xlb['Annualized_return'] += finalres['Annualized_return'][0]
+    
     cumulativeret_xlb['temp1'] = strategyres['cumulative_ret']
     cumulativeret_xlb['cum_ret'] += cumulativeret_xlb['temp1']
     cumulativeret_xlb['temp2'] = strategyres['benchmark']
     cumulativeret_xlb['benchmark'] += cumulativeret_xlb['temp2'] 
     cumulativeret_xlb['temp3'] = strategyres['benchmark2']
     cumulativeret_xlb['benchmark2'] += cumulativeret_xlb['temp3']
+    cumulativeret_xlb['temp4'] = strategyres['returns']*strategyres['position']
+    cumulativeret_xlb['returns'] += cumulativeret_xlb['temp4']
     
 cumulativeret_xlb['cum_ret'] /= len(set(res_xlb.index.get_level_values('stock')))
 cumulativeret_xlb['benchmark'] /= len(set(res_xlb.index.get_level_values('stock')))
 cumulativeret_xlb['benchmark2'] /= len(set(res_xlb.index.get_level_values('stock')))
+cumulativeret_xlb['returns'] /= len(set(res_xlb.index.get_level_values('stock')))
+
+finalresult_xlb['Average_trade_num'] /= len(set(res_xlb.index.get_level_values('stock')))
+finalresult_xlb['Victory_ratio'] /= len(set(res_xlb.index.get_level_values('stock')))
+finalresult_xlb['Sharpe_ratio'] /= len(set(res_xlb.index.get_level_values('stock')))
+finalresult_xlb['Annualized_return'] /= len(set(res_xlb.index.get_level_values('stock')))
 
 
+print('------------on the level of average of each stock------------')
+print('Sharpe Ratio:',round(finalresult_xlb['Sharpe_ratio'],2))
+print('Annualized return:{}%'.format(round(finalresult_xlb['Annualized_return']*100,2)))
+print('Victory Ratio:{}%'.format(round(finalresult_xlb['Victory_ratio']*100,2)))
+print('Maximum drop down:{}%'.format(round(finalresult_xlb['Max_drop_down'],2)))
+print('Maximun loss for one single trading:{}%'.format(round(finalresult_xlb \
+      ['MaxlossOnce']*100,2)))
+print('Monthly average trading times:{}'.format(round(finalresult_xlb \
+      ['Average_trade_num'] *30,2)))
+print("-------------------------------------------------")
+print('strategy annual return:{}% '.format(100*round(cumulativeret_xlb \
+      ['cum_ret'][-1]** (252.0/cumulativeret_xlb.shape[0])-1,2)))
+
+print('benchmark annual return:{}% '.format(100*round(cumulativeret_xlb \
+      ['benchmark'][-1]** (252.0/cumulativeret_xlb.shape[0])-1,2)))
+
+print('strategy Sharpe Ratio:',round(cumulativeret_xlb.returns.mean()/ \
+      cumulativeret_xlb.returns.std()*np.sqrt(252.0),2))
+
+
+print("-------------------------------------------------")
 etf_xlb2 = etf_xlb.copy()[etf_xlb.index>="2010-01-01"]
 etf_xlb2['cum_ret'] = (1+etf_xlb2.returns*np.mean(res_xlb.beta)).cumprod()
 
@@ -313,6 +417,8 @@ plt.plot(cumulativeret_xlb['benchmark2'],label="benchmark returns2")
 plt.plot(etf_xlb2['cum_ret'],label="ETF returns")
 plt.legend(loc='upper left',fontsize=15)
 plt.title('Basic Materials: XLB',fontsize=20)
+
+
 
 #%%
 # Consumer Cyclical: XLY 
@@ -410,11 +516,19 @@ res_xly = res_xly[res_xly.index.get_level_values('date')>='2010-01-01']
 
 
 # begin strategy
-cumulativeret_xly = pd.DataFrame(index = res_xly.unstack().index,columns= \
-                                 ['cum_ret','benchmark','benchmark2'])
+cumulativeret_xly = pd.DataFrame(index = res_xly.unstack().index,columns=['returns','cum_ret','benchmark','benchmark2'])
+cumulativeret_xly['returns'] = 0
 cumulativeret_xly['cum_ret'] = 0
 cumulativeret_xly['benchmark'] = 0
 cumulativeret_xly['benchmark2'] = 0
+finalresult_xly = pd.DataFrame(index = ['strategy'],columns=['Average_trade_num','MaxlossOnce','Max_drop_down','Victory_ratio', \
+                                        'Sharpe_ratio','Annualized_return'])
+finalresult_xly['Average_trade_num'] = 0
+finalresult_xly['MaxlossOnce'] = 0
+finalresult_xly['Max_drop_down'] = 0
+finalresult_xly['Victory_ratio'] = 0
+finalresult_xly['Sharpe_ratio'] = 0
+finalresult_xly['Annualized_return'] = 0
 
 for stock in set(res_xly.index.get_level_values('stock')):
     cur = res_xly[['close','beta','s_score']][res_xly.index.get_level_values('stock')==stock]
@@ -422,28 +536,67 @@ for stock in set(res_xly.index.get_level_values('stock')):
     cur = cur.reset_index()
 
     strategyres, transaction = strategy(cur,0.1,0.1,-0.15,-0.2)
-#    finalresult, yearlyresult = performance(transaction,strategyres)
-    strategyres.set_index(strategyres['date'],inplace=True)
+    finalres, yearlyres = performance(transaction, strategyres)
+    finalresult_xly['Average_trade_num'] += finalres['Average_trade_num'][0]
+    finalresult_xly['MaxlossOnce'] = max(finalresult_xly.MaxlossOnce[0],finalres.MaxlossOnce[0])
+    finalresult_xly['Max_drop_down'] = max(finalresult_xly.Max_drop_down[0],finalres.Max_drop_down[0])
+    finalresult_xly['Victory_ratio'] += finalres['Victory_ratio'][0]
+    finalresult_xly['Sharpe_ratio'] += finalres['Sharpe_ratio'][0]
+    finalresult_xly['Annualized_return'] += finalres['Annualized_return'][0]
+    
     cumulativeret_xly['temp1'] = strategyres['cumulative_ret']
     cumulativeret_xly['cum_ret'] += cumulativeret_xly['temp1']
     cumulativeret_xly['temp2'] = strategyres['benchmark']
-    cumulativeret_xly['benchmark'] += cumulativeret_xly['temp2']
+    cumulativeret_xly['benchmark'] += cumulativeret_xly['temp2'] 
     cumulativeret_xly['temp3'] = strategyres['benchmark2']
     cumulativeret_xly['benchmark2'] += cumulativeret_xly['temp3']
-            
+    cumulativeret_xly['temp4'] = strategyres['returns']*strategyres['position']
+    cumulativeret_xly['returns'] += cumulativeret_xly['temp4']
+    
 cumulativeret_xly['cum_ret'] /= len(set(res_xly.index.get_level_values('stock')))
 cumulativeret_xly['benchmark'] /= len(set(res_xly.index.get_level_values('stock')))
 cumulativeret_xly['benchmark2'] /= len(set(res_xly.index.get_level_values('stock')))
+cumulativeret_xly['returns'] /= len(set(res_xly.index.get_level_values('stock')))
 
+finalresult_xly['Average_trade_num'] /= len(set(res_xly.index.get_level_values('stock')))
+finalresult_xly['Victory_ratio'] /= len(set(res_xly.index.get_level_values('stock')))
+finalresult_xly['Sharpe_ratio'] /= len(set(res_xly.index.get_level_values('stock')))
+finalresult_xly['Annualized_return'] /= len(set(res_xly.index.get_level_values('stock')))
 etf_xly2 = etf_xly.copy()[etf_xly.index>="2010-01-01"]
 etf_xly2['cum_ret'] = (1+etf_xly2.returns*np.mean(res_xly.beta)).cumprod()
-# plot cumulative returns
-plt.plot(cumulativeret_xly['cum_ret'],label="cumulative_returns")
+# plot cumulative returns and results
+print('------------on the level of average of each stock------------')
+print('Sharpe Ratio:',round(finalresult_xly['Sharpe_ratio'],2))
+print('Annualized return:{}%'.format(round(finalresult_xly['Annualized_return']*100,2)))
+print('Victory Ratio:{}%'.format(round(finalresult_xly['Victory_ratio']*100,2)))
+print('Maximum drop down:{}%'.format(round(finalresult_xly['Max_drop_down'],2)))
+print('Maximun loss for one single trading:{}%'.format(round(finalresult_xly['MaxlossOnce']*100,2)))
+print('Monthly average trading times:{}'.format(round(finalresult_xly['Average_trade_num'] *30,2)))
+print("-------------------------------------------------")
+print('strategy annual return:{}% '.format(100*round(cumulativeret_xly['cum_ret'][-1]** \
+                                      (252.0/cumulativeret_xly.shape[0])-1,2)))
+
+print('benchmark annual return:{}% '.format(100*round(cumulativeret_xly['benchmark'][-1]** \
+                                      (252.0/cumulativeret_xly.shape[0])-1,2)))
+
+print('strategy Sharpe Ratio:',round(cumulativeret_xly.returns.mean()/ \
+      cumulativeret_xly.returns.std()*np.sqrt(252.0),2))
+
+
+print("-------------------------------------------------")
+etf_xly2 = etf_xly.copy()[etf_xly.index>="2010-01-01"]
+etf_xly2['cum_ret'] = (1+etf_xly2.returns*np.mean(res_xly.beta)).cumprod()
+
+plt.plot(cumulativeret_xly['cum_ret'],label="cumulative returns")
 plt.plot(cumulativeret_xly['benchmark'],label="benchmark returns")
 plt.plot(cumulativeret_xly['benchmark2'],label="benchmark returns2")
-plt.plot(etf_xly2['cum_ret'],label='ETF returns')
+plt.plot(etf_xly2['cum_ret'],label="ETF returns")
 plt.legend(loc='upper left',fontsize=15)
 plt.title('Consumer Cyclical: XLY ',fontsize=20)
+
+# percentage of stock whose s_score reaches 0.1, which is our open position point
+float(len(res_xly.s_score[res_xly.s_score>0.1]))/len(res_xly.s_score) 
+# 0.38
 
 #%%
 # Financial Services: XLF
@@ -541,10 +694,19 @@ res_xlf = res_xlf[res_xlf.index.get_level_values('date')>='2010-01-01']
 
 
 # begin strategy
-cumulativeret_xlf = pd.DataFrame(index = res_xlf.unstack().index,columns=['cum_ret','benchmark','benchmark2'])
+cumulativeret_xlf = pd.DataFrame(index = res_xlf.unstack().index,columns=['returns','cum_ret','benchmark','benchmark2'])
+cumulativeret_xlf['returns'] = 0
 cumulativeret_xlf['cum_ret'] = 0
 cumulativeret_xlf['benchmark'] = 0
 cumulativeret_xlf['benchmark2'] = 0
+finalresult_xlf = pd.DataFrame(index = ['strategy'],columns=['Average_trade_num','MaxlossOnce','Max_drop_down','Victory_ratio', \
+                                        'Sharpe_ratio','Annualized_return'])
+finalresult_xlf['Average_trade_num'] = 0
+finalresult_xlf['MaxlossOnce'] = 0
+finalresult_xlf['Max_drop_down'] = 0
+finalresult_xlf['Victory_ratio'] = 0
+finalresult_xlf['Sharpe_ratio'] = 0
+finalresult_xlf['Annualized_return'] = 0
 
 for stock in set(res_xlf.index.get_level_values('stock')):
     cur = res_xlf[['close','beta','s_score']][res_xlf.index.get_level_values('stock')==stock]
@@ -552,28 +714,67 @@ for stock in set(res_xlf.index.get_level_values('stock')):
     cur = cur.reset_index()
 
     strategyres, transaction = strategy(cur,0.1,0.1,-0.15,-0.2)
-#    finalresult, yearlyresult = performance(transaction,strategyres)
-    strategyres.set_index(strategyres['date'],inplace=True)
+    finalres, yearlyres = performance(transaction, strategyres)
+    finalresult_xlf['Average_trade_num'] += finalres['Average_trade_num'][0]
+    finalresult_xlf['MaxlossOnce'] = max(finalresult_xlf.MaxlossOnce[0],finalres.MaxlossOnce[0])
+    finalresult_xlf['Max_drop_down'] = max(finalresult_xlf.Max_drop_down[0],finalres.Max_drop_down[0])
+    finalresult_xlf['Victory_ratio'] += finalres['Victory_ratio'][0]
+    finalresult_xlf['Sharpe_ratio'] += finalres['Sharpe_ratio'][0]
+    finalresult_xlf['Annualized_return'] += finalres['Annualized_return'][0]
+    
     cumulativeret_xlf['temp1'] = strategyres['cumulative_ret']
     cumulativeret_xlf['cum_ret'] += cumulativeret_xlf['temp1']
     cumulativeret_xlf['temp2'] = strategyres['benchmark']
-    cumulativeret_xlf['benchmark'] += cumulativeret_xlf['temp2']
+    cumulativeret_xlf['benchmark'] += cumulativeret_xlf['temp2'] 
     cumulativeret_xlf['temp3'] = strategyres['benchmark2']
     cumulativeret_xlf['benchmark2'] += cumulativeret_xlf['temp3']
-            
+    cumulativeret_xlf['temp4'] = strategyres['returns']*strategyres['position']
+    cumulativeret_xlf['returns'] += cumulativeret_xlf['temp4']
+    
 cumulativeret_xlf['cum_ret'] /= len(set(res_xlf.index.get_level_values('stock')))
 cumulativeret_xlf['benchmark'] /= len(set(res_xlf.index.get_level_values('stock')))
 cumulativeret_xlf['benchmark2'] /= len(set(res_xlf.index.get_level_values('stock')))
+cumulativeret_xlf['returns'] /= len(set(res_xlf.index.get_level_values('stock')))
 
+finalresult_xlf['Average_trade_num'] /= len(set(res_xlf.index.get_level_values('stock')))
+finalresult_xlf['Victory_ratio'] /= len(set(res_xlf.index.get_level_values('stock')))
+finalresult_xlf['Sharpe_ratio'] /= len(set(res_xlf.index.get_level_values('stock')))
+finalresult_xlf['Annualized_return'] /= len(set(res_xlf.index.get_level_values('stock')))
 etf_xlf2 = etf_xlf.copy()[etf_xlf.index>="2010-01-01"]
 etf_xlf2['cum_ret'] = (1+etf_xlf2.returns*np.mean(res_xlf.beta)).cumprod()
-# plot cumulative returns
-plt.plot(cumulativeret_xlf['cum_ret'],label="cumulative_returns")
+# plot cumulative returns and results
+print('------------on the level of average of each stock------------')
+print('Sharpe Ratio:',round(finalresult_xlf['Sharpe_ratio'],2))
+print('Annualized return:{}%'.format(round(finalresult_xlf['Annualized_return']*100,2)))
+print('Victory Ratio:{}%'.format(round(finalresult_xlf['Victory_ratio']*100,2)))
+print('Maximum drop down:{}%'.format(round(finalresult_xlf['Max_drop_down'],2)))
+print('Maximun loss for one single trading:{}%'.format(round(finalresult_xlf['MaxlossOnce']*100,2)))
+print('Monthly average trading times:{}'.format(round(finalresult_xlf['Average_trade_num'] *30,2)))
+print("-------------------------------------------------")
+print('strategy annual return:{}% '.format(100*round(cumulativeret_xlf['cum_ret'][-1]** \
+                                      (252.0/cumulativeret_xlf.shape[0])-1,2)))
+
+print('benchmark annual return:{}% '.format(100*round(cumulativeret_xlf['benchmark'][-1]** \
+                                      (252.0/cumulativeret_xlf.shape[0])-1,2)))
+
+print('strategy Sharpe Ratio:',round(cumulativeret_xlf.returns.mean()/ \
+      cumulativeret_xlf.returns.std()*np.sqrt(252.0),2))
+
+
+print("-------------------------------------------------")
+etf_xlf2 = etf_xlf.copy()[etf_xlf.index>="2010-01-01"]
+etf_xlf2['cum_ret'] = (1+etf_xlf2.returns*np.mean(res_xlf.beta)).cumprod()
+
+plt.plot(cumulativeret_xlf['cum_ret'],label="cumulative returns")
 plt.plot(cumulativeret_xlf['benchmark'],label="benchmark returns")
 plt.plot(cumulativeret_xlf['benchmark2'],label="benchmark returns2")
-plt.plot(etf_xlf2['cum_ret'],label='ETF returns')
+plt.plot(etf_xlf2['cum_ret'],label="ETF returns")
 plt.legend(loc='upper left',fontsize=15)
 plt.title('Financial Services: XLF',fontsize=20)
+
+# percentage of stock whose s_score reaches 0.1, which is our open position point
+float(len(res_xlf.s_score[res_xlf.s_score>0.1]))/len(res_xlf.s_score)
+#0.28
 
 #%%
 # Real Estate: IYR
@@ -671,10 +872,19 @@ res_iyr = res_iyr[res_iyr.index.get_level_values('date')>='2010-01-01']
 
 
 # begin strategy
-cumulativeret_iyr = pd.DataFrame(index = res_iyr.unstack().index,columns=['cum_ret','benchmark','benchmark2'])
+cumulativeret_iyr = pd.DataFrame(index = res_iyr.unstack().index,columns=['returns','cum_ret','benchmark','benchmark2'])
+cumulativeret_iyr['returns'] = 0
 cumulativeret_iyr['cum_ret'] = 0
 cumulativeret_iyr['benchmark'] = 0
 cumulativeret_iyr['benchmark2'] = 0
+finalresult_iyr = pd.DataFrame(index = ['strategy'],columns=['Average_trade_num','MaxlossOnce','Max_drop_down','Victory_ratio', \
+                                        'Sharpe_ratio','Annualized_return'])
+finalresult_iyr['Average_trade_num'] = 0
+finalresult_iyr['MaxlossOnce'] = 0
+finalresult_iyr['Max_drop_down'] = 0
+finalresult_iyr['Victory_ratio'] = 0
+finalresult_iyr['Sharpe_ratio'] = 0
+finalresult_iyr['Annualized_return'] = 0
 
 for stock in set(res_iyr.index.get_level_values('stock')):
     cur = res_iyr[['close','beta','s_score']][res_iyr.index.get_level_values('stock')==stock]
@@ -682,28 +892,67 @@ for stock in set(res_iyr.index.get_level_values('stock')):
     cur = cur.reset_index()
 
     strategyres, transaction = strategy(cur,0.1,0.1,-0.15,-0.2)
-#    finalresult, yearlyresult = performance(transaction,strategyres)
-    strategyres.set_index(strategyres['date'],inplace=True)
+    finalres, yearlyres = performance(transaction, strategyres)
+    finalresult_iyr['Average_trade_num'] += finalres['Average_trade_num'][0]
+    finalresult_iyr['MaxlossOnce'] = max(finalresult_iyr.MaxlossOnce[0],finalres.MaxlossOnce[0])
+    finalresult_iyr['Max_drop_down'] = max(finalresult_iyr.Max_drop_down[0],finalres.Max_drop_down[0])
+    finalresult_iyr['Victory_ratio'] += finalres['Victory_ratio'][0]
+    finalresult_iyr['Sharpe_ratio'] += finalres['Sharpe_ratio'][0]
+    finalresult_iyr['Annualized_return'] += finalres['Annualized_return'][0]
+    
     cumulativeret_iyr['temp1'] = strategyres['cumulative_ret']
     cumulativeret_iyr['cum_ret'] += cumulativeret_iyr['temp1']
     cumulativeret_iyr['temp2'] = strategyres['benchmark']
-    cumulativeret_iyr['benchmark'] += cumulativeret_iyr['temp2']
+    cumulativeret_iyr['benchmark'] += cumulativeret_iyr['temp2'] 
     cumulativeret_iyr['temp3'] = strategyres['benchmark2']
     cumulativeret_iyr['benchmark2'] += cumulativeret_iyr['temp3']
-            
+    cumulativeret_iyr['temp4'] = strategyres['returns']*strategyres['position']
+    cumulativeret_iyr['returns'] += cumulativeret_iyr['temp4']
+    
 cumulativeret_iyr['cum_ret'] /= len(set(res_iyr.index.get_level_values('stock')))
 cumulativeret_iyr['benchmark'] /= len(set(res_iyr.index.get_level_values('stock')))
 cumulativeret_iyr['benchmark2'] /= len(set(res_iyr.index.get_level_values('stock')))
+cumulativeret_iyr['returns'] /= len(set(res_iyr.index.get_level_values('stock')))
 
+finalresult_iyr['Average_trade_num'] /= len(set(res_iyr.index.get_level_values('stock')))
+finalresult_iyr['Victory_ratio'] /= len(set(res_iyr.index.get_level_values('stock')))
+finalresult_iyr['Sharpe_ratio'] /= len(set(res_iyr.index.get_level_values('stock')))
+finalresult_iyr['Annualized_return'] /= len(set(res_iyr.index.get_level_values('stock')))
 etf_iyr2 = etf_iyr.copy()[etf_iyr.index>="2010-01-01"]
 etf_iyr2['cum_ret'] = (1+etf_iyr2.returns*np.mean(res_iyr.beta)).cumprod()
-# plot cumulative returns
-plt.plot(cumulativeret_iyr['cum_ret'],label="cumulative_returns")
+# plot cumulative returns and results
+print('------------on the level of average of each stock------------')
+print('Sharpe Ratio:',round(finalresult_iyr['Sharpe_ratio'],2))
+print('Annualized return:{}%'.format(round(finalresult_iyr['Annualized_return']*100,2)))
+print('Victory Ratio:{}%'.format(round(finalresult_iyr['Victory_ratio']*100,2)))
+print('Maximum drop down:{}%'.format(round(finalresult_iyr['Max_drop_down'],2)))
+print('Maximun loss for one single trading:{}%'.format(round(finalresult_iyr['MaxlossOnce']*100,2)))
+print('Monthly average trading times:{}'.format(round(finalresult_iyr['Average_trade_num'] *30,2)))
+print("-------------------------------------------------")
+print('strategy annual return:{}% '.format(100*round(cumulativeret_iyr['cum_ret'][-1]** \
+                                      (252.0/cumulativeret_iyr.shape[0])-1,2)))
+
+print('benchmark annual return:{}% '.format(100*round(cumulativeret_iyr['benchmark'][-1]** \
+                                      (252.0/cumulativeret_iyr.shape[0])-1,2)))
+
+print('strategy Sharpe Ratio:',round(cumulativeret_iyr.returns.mean()/ \
+      cumulativeret_iyr.returns.std()*np.sqrt(252.0),2))
+
+
+print("-------------------------------------------------")
+etf_iyr2 = etf_iyr.copy()[etf_iyr.index>="2010-01-01"]
+etf_iyr2['cum_ret'] = (1+etf_iyr2.returns*np.mean(res_iyr.beta)).cumprod()
+
+plt.plot(cumulativeret_iyr['cum_ret'],label="cumulative returns")
 plt.plot(cumulativeret_iyr['benchmark'],label="benchmark returns")
 plt.plot(cumulativeret_iyr['benchmark2'],label="benchmark returns2")
-plt.plot(etf_iyr2['cum_ret'],label='ETF returns')
+plt.plot(etf_iyr2['cum_ret'],label="ETF returns")
 plt.legend(loc='upper left',fontsize=15)
 plt.title('Real Estate: IYR',fontsize=20)
+
+# percentage of stock whose s_score reaches 0.1, which is our open position point
+float(len(res_iyr.s_score[res_iyr.s_score>0.1]))/len(res_iyr.s_score)
+#0.35
 
 #%%
 # Consumer Defensive: XLP  
@@ -801,11 +1050,19 @@ res_xlp = res_xlp[res_xlp.index.get_level_values('date')>='2010-01-01']
 
 
 # begin strategy
-cumulativeret_xlp = pd.DataFrame(index = res_xlp.unstack().index,columns=['cum_ret','benchmark','benchmark2'])
+cumulativeret_xlp = pd.DataFrame(index = res_xlp.unstack().index,columns=['returns','cum_ret','benchmark','benchmark2'])
+cumulativeret_xlp['returns'] = 0
 cumulativeret_xlp['cum_ret'] = 0
 cumulativeret_xlp['benchmark'] = 0
 cumulativeret_xlp['benchmark2'] = 0
-
+finalresult_xlp = pd.DataFrame(index = ['strategy'],columns=['Average_trade_num','MaxlossOnce','Max_drop_down','Victory_ratio', \
+                                        'Sharpe_ratio','Annualized_return'])
+finalresult_xlp['Average_trade_num'] = 0
+finalresult_xlp['MaxlossOnce'] = 0
+finalresult_xlp['Max_drop_down'] = 0
+finalresult_xlp['Victory_ratio'] = 0
+finalresult_xlp['Sharpe_ratio'] = 0
+finalresult_xlp['Annualized_return'] = 0
 
 for stock in set(res_xlp.index.get_level_values('stock')):
     cur = res_xlp[['close','beta','s_score']][res_xlp.index.get_level_values('stock')==stock]
@@ -813,28 +1070,67 @@ for stock in set(res_xlp.index.get_level_values('stock')):
     cur = cur.reset_index()
 
     strategyres, transaction = strategy(cur,0.1,0.1,-0.15,-0.2)
-#    finalresult, yearlyresult = performance(transaction,strategyres)
-    strategyres.set_index(strategyres['date'],inplace=True)
+    finalres, yearlyres = performance(transaction, strategyres)
+    finalresult_xlp['Average_trade_num'] += finalres['Average_trade_num'][0]
+    finalresult_xlp['MaxlossOnce'] = max(finalresult_xlp.MaxlossOnce[0],finalres.MaxlossOnce[0])
+    finalresult_xlp['Max_drop_down'] = max(finalresult_xlp.Max_drop_down[0],finalres.Max_drop_down[0])
+    finalresult_xlp['Victory_ratio'] += finalres['Victory_ratio'][0]
+    finalresult_xlp['Sharpe_ratio'] += finalres['Sharpe_ratio'][0]
+    finalresult_xlp['Annualized_return'] += finalres['Annualized_return'][0]
+    
     cumulativeret_xlp['temp1'] = strategyres['cumulative_ret']
     cumulativeret_xlp['cum_ret'] += cumulativeret_xlp['temp1']
     cumulativeret_xlp['temp2'] = strategyres['benchmark']
-    cumulativeret_xlp['benchmark'] += cumulativeret_xlp['temp2']
+    cumulativeret_xlp['benchmark'] += cumulativeret_xlp['temp2'] 
     cumulativeret_xlp['temp3'] = strategyres['benchmark2']
     cumulativeret_xlp['benchmark2'] += cumulativeret_xlp['temp3']
-            
+    cumulativeret_xlp['temp4'] = strategyres['returns']*strategyres['position']
+    cumulativeret_xlp['returns'] += cumulativeret_xlp['temp4']
+    
 cumulativeret_xlp['cum_ret'] /= len(set(res_xlp.index.get_level_values('stock')))
 cumulativeret_xlp['benchmark'] /= len(set(res_xlp.index.get_level_values('stock')))
 cumulativeret_xlp['benchmark2'] /= len(set(res_xlp.index.get_level_values('stock')))
+cumulativeret_xlp['returns'] /= len(set(res_xlp.index.get_level_values('stock')))
 
+finalresult_xlp['Average_trade_num'] /= len(set(res_xlp.index.get_level_values('stock')))
+finalresult_xlp['Victory_ratio'] /= len(set(res_xlp.index.get_level_values('stock')))
+finalresult_xlp['Sharpe_ratio'] /= len(set(res_xlp.index.get_level_values('stock')))
+finalresult_xlp['Annualized_return'] /= len(set(res_xlp.index.get_level_values('stock')))
 etf_xlp2 = etf_xlp.copy()[etf_xlp.index>="2010-01-01"]
 etf_xlp2['cum_ret'] = (1+etf_xlp2.returns*np.mean(res_xlp.beta)).cumprod()
-# plot cumulative returns
-plt.plot(cumulativeret_xlp['cum_ret'],label="cumulative_returns")
+# plot cumulative returns and results
+print('------------on the level of average of each stock------------')
+print('Sharpe Ratio:',round(finalresult_xlp['Sharpe_ratio'],2))
+print('Annualized return:{}%'.format(round(finalresult_xlp['Annualized_return']*100,2)))
+print('Victory Ratio:{}%'.format(round(finalresult_xlp['Victory_ratio']*100,2)))
+print('Maximum drop down:{}%'.format(round(finalresult_xlp['Max_drop_down'],2)))
+print('Maximun loss for one single trading:{}%'.format(round(finalresult_xlp['MaxlossOnce']*100,2)))
+print('Monthly average trading times:{}'.format(round(finalresult_xlp['Average_trade_num'] *30,2)))
+print("-------------------------------------------------")
+print('strategy annual return:{}% '.format(100*round(cumulativeret_xlp['cum_ret'][-1]** \
+                                      (252.0/cumulativeret_xlp.shape[0])-1,2)))
+
+print('benchmark annual return:{}% '.format(100*round(cumulativeret_xlp['benchmark'][-1]** \
+                                      (252.0/cumulativeret_xlp.shape[0])-1,2)))
+
+print('strategy Sharpe Ratio:',round(cumulativeret_xlp.returns.mean()/ \
+      cumulativeret_xlp.returns.std()*np.sqrt(252.0),2))
+
+
+print("-------------------------------------------------")
+etf_xlp2 = etf_xlp.copy()[etf_xlp.index>="2010-01-01"]
+etf_xlp2['cum_ret'] = (1+etf_xlp2.returns*np.mean(res_xlp.beta)).cumprod()
+
+plt.plot(cumulativeret_xlp['cum_ret'],label="cumulative returns")
 plt.plot(cumulativeret_xlp['benchmark'],label="benchmark returns")
 plt.plot(cumulativeret_xlp['benchmark2'],label="benchmark returns2")
-plt.plot(etf_xlp2['cum_ret'],label='ETF returns')
+plt.plot(etf_xlp2['cum_ret'],label="ETF returns")
 plt.legend(loc='upper left',fontsize=15)
 plt.title('Consumer Defensive: XLP',fontsize=20) 
+
+# percentage of stock whose s_score reaches 0.1, which is our open position point
+float(len(res_xlp.s_score[res_xlp.s_score>0.1]))/len(res_xlp.s_score)
+#0.40
 
 #%%
 # Healthcare: XLV  
@@ -932,10 +1228,19 @@ res_xlv = res_xlv[res_xlv.index.get_level_values('date')>='2010-01-01']
 
 
 # begin strategy
-cumulativeret_xlv = pd.DataFrame(index = res_xlv.unstack().index,columns=['cum_ret','benchmark','benchmark2'])
+cumulativeret_xlv = pd.DataFrame(index = res_xlv.unstack().index,columns=['returns','cum_ret','benchmark','benchmark2'])
+cumulativeret_xlv['returns'] = 0
 cumulativeret_xlv['cum_ret'] = 0
 cumulativeret_xlv['benchmark'] = 0
 cumulativeret_xlv['benchmark2'] = 0
+finalresult_xlv = pd.DataFrame(index = ['strategy'],columns=['Average_trade_num','MaxlossOnce','Max_drop_down','Victory_ratio', \
+                                        'Sharpe_ratio','Annualized_return'])
+finalresult_xlv['Average_trade_num'] = 0
+finalresult_xlv['MaxlossOnce'] = 0
+finalresult_xlv['Max_drop_down'] = 0
+finalresult_xlv['Victory_ratio'] = 0
+finalresult_xlv['Sharpe_ratio'] = 0
+finalresult_xlv['Annualized_return'] = 0
 
 for stock in set(res_xlv.index.get_level_values('stock')):
     cur = res_xlv[['close','beta','s_score']][res_xlv.index.get_level_values('stock')==stock]
@@ -943,28 +1248,67 @@ for stock in set(res_xlv.index.get_level_values('stock')):
     cur = cur.reset_index()
 
     strategyres, transaction = strategy(cur,0.1,0.1,-0.15,-0.2)
-#    finalresult, yearlyresult = performance(transaction,strategyres)
-    strategyres.set_index(strategyres['date'],inplace=True)
+    finalres, yearlyres = performance(transaction, strategyres)
+    finalresult_xlv['Average_trade_num'] += finalres['Average_trade_num'][0]
+    finalresult_xlv['MaxlossOnce'] = max(finalresult_xlv.MaxlossOnce[0],finalres.MaxlossOnce[0])
+    finalresult_xlv['Max_drop_down'] = max(finalresult_xlv.Max_drop_down[0],finalres.Max_drop_down[0])
+    finalresult_xlv['Victory_ratio'] += finalres['Victory_ratio'][0]
+    finalresult_xlv['Sharpe_ratio'] += finalres['Sharpe_ratio'][0]
+    finalresult_xlv['Annualized_return'] += finalres['Annualized_return'][0]
+    
     cumulativeret_xlv['temp1'] = strategyres['cumulative_ret']
     cumulativeret_xlv['cum_ret'] += cumulativeret_xlv['temp1']
     cumulativeret_xlv['temp2'] = strategyres['benchmark']
-    cumulativeret_xlv['benchmark'] += cumulativeret_xlv['temp2']
+    cumulativeret_xlv['benchmark'] += cumulativeret_xlv['temp2'] 
     cumulativeret_xlv['temp3'] = strategyres['benchmark2']
     cumulativeret_xlv['benchmark2'] += cumulativeret_xlv['temp3']
-            
+    cumulativeret_xlv['temp4'] = strategyres['returns']*strategyres['position']
+    cumulativeret_xlv['returns'] += cumulativeret_xlv['temp4']
+    
 cumulativeret_xlv['cum_ret'] /= len(set(res_xlv.index.get_level_values('stock')))
 cumulativeret_xlv['benchmark'] /= len(set(res_xlv.index.get_level_values('stock')))
 cumulativeret_xlv['benchmark2'] /= len(set(res_xlv.index.get_level_values('stock')))
+cumulativeret_xlv['returns'] /= len(set(res_xlv.index.get_level_values('stock')))
 
+finalresult_xlv['Average_trade_num'] /= len(set(res_xlv.index.get_level_values('stock')))
+finalresult_xlv['Victory_ratio'] /= len(set(res_xlv.index.get_level_values('stock')))
+finalresult_xlv['Sharpe_ratio'] /= len(set(res_xlv.index.get_level_values('stock')))
+finalresult_xlv['Annualized_return'] /= len(set(res_xlv.index.get_level_values('stock')))
 etf_xlv2 = etf_xlv.copy()[etf_xlv.index>="2010-01-01"]
 etf_xlv2['cum_ret'] = (1+etf_xlv2.returns*np.mean(res_xlv.beta)).cumprod()
-# plot cumulative returns
-plt.plot(cumulativeret_xlv['cum_ret'],label="cumulative_returns")
+# plot cumulative returns and results
+print('------------on the level of average of each stock------------')
+print('Sharpe Ratio:',round(finalresult_xlv['Sharpe_ratio'],2))
+print('Annualized return:{}%'.format(round(finalresult_xlv['Annualized_return']*100,2)))
+print('Victory Ratio:{}%'.format(round(finalresult_xlv['Victory_ratio']*100,2)))
+print('Maximum drop down:{}%'.format(round(finalresult_xlv['Max_drop_down'],2)))
+print('Maximun loss for one single trading:{}%'.format(round(finalresult_xlv['MaxlossOnce']*100,2)))
+print('Monthly average trading times:{}'.format(round(finalresult_xlv['Average_trade_num'] *30,2)))
+print("-------------------------------------------------")
+print('strategy annual return:{}% '.format(100*round(cumulativeret_xlv['cum_ret'][-1]** \
+                                      (252.0/cumulativeret_xlv.shape[0])-1,2)))
+
+print('benchmark annual return:{}% '.format(100*round(cumulativeret_xlv['benchmark'][-1]** \
+                                      (252.0/cumulativeret_xlv.shape[0])-1,2)))
+
+print('strategy Sharpe Ratio:',round(cumulativeret_xlv.returns.mean()/ \
+      cumulativeret_xlv.returns.std()*np.sqrt(252.0),2))
+
+
+print("-------------------------------------------------")
+etf_xlv2 = etf_xlv.copy()[etf_xlv.index>="2010-01-01"]
+etf_xlv2['cum_ret'] = (1+etf_xlv2.returns*np.mean(res_xlv.beta)).cumprod()
+
+plt.plot(cumulativeret_xlv['cum_ret'],label="cumulative returns")
 plt.plot(cumulativeret_xlv['benchmark'],label="benchmark returns")
 plt.plot(cumulativeret_xlv['benchmark2'],label="benchmark returns2")
-plt.plot(etf_xlv2['cum_ret'],label='ETF returns')
+plt.plot(etf_xlv2['cum_ret'],label="ETF returns")
 plt.legend(loc='upper left',fontsize=15)
 plt.title('Healthcare: XLV',fontsize=20)
+
+# percentage of stock whose s_score reaches 0.1, which is our open position point
+float(len(res_xlv.s_score[res_xlv.s_score>0.1]))/len(res_xlv.s_score)
+#0.39
 
 #%%
 # Utilities: XLU 
@@ -1062,10 +1406,19 @@ res_xlu = res_xlu[res_xlu.index.get_level_values('date')>='2010-01-01']
 
 
 # begin strategy
-cumulativeret_xlu = pd.DataFrame(index = res_xlu.unstack().index,columns=['cum_ret','benchmark','benchmark2'])
+cumulativeret_xlu = pd.DataFrame(index = res_xlu.unstack().index,columns=['returns','cum_ret','benchmark','benchmark2'])
+cumulativeret_xlu['returns'] = 0
 cumulativeret_xlu['cum_ret'] = 0
 cumulativeret_xlu['benchmark'] = 0
 cumulativeret_xlu['benchmark2'] = 0
+finalresult_xlu = pd.DataFrame(index = ['strategy'],columns=['Average_trade_num','MaxlossOnce','Max_drop_down','Victory_ratio', \
+                                        'Sharpe_ratio','Annualized_return'])
+finalresult_xlu['Average_trade_num'] = 0
+finalresult_xlu['MaxlossOnce'] = 0
+finalresult_xlu['Max_drop_down'] = 0
+finalresult_xlu['Victory_ratio'] = 0
+finalresult_xlu['Sharpe_ratio'] = 0
+finalresult_xlu['Annualized_return'] = 0
 
 for stock in set(res_xlu.index.get_level_values('stock')):
     cur = res_xlu[['close','beta','s_score']][res_xlu.index.get_level_values('stock')==stock]
@@ -1073,28 +1426,67 @@ for stock in set(res_xlu.index.get_level_values('stock')):
     cur = cur.reset_index()
 
     strategyres, transaction = strategy(cur,0.1,0.1,-0.15,-0.2)
-#    finalresult, yearlyresult = performance(transaction,strategyres)
-    strategyres.set_index(strategyres['date'],inplace=True)
+    finalres, yearlyres = performance(transaction, strategyres)
+    finalresult_xlu['Average_trade_num'] += finalres['Average_trade_num'][0]
+    finalresult_xlu['MaxlossOnce'] = max(finalresult_xlu.MaxlossOnce[0],finalres.MaxlossOnce[0])
+    finalresult_xlu['Max_drop_down'] = max(finalresult_xlu.Max_drop_down[0],finalres.Max_drop_down[0])
+    finalresult_xlu['Victory_ratio'] += finalres['Victory_ratio'][0]
+    finalresult_xlu['Sharpe_ratio'] += finalres['Sharpe_ratio'][0]
+    finalresult_xlu['Annualized_return'] += finalres['Annualized_return'][0]
+    
     cumulativeret_xlu['temp1'] = strategyres['cumulative_ret']
     cumulativeret_xlu['cum_ret'] += cumulativeret_xlu['temp1']
     cumulativeret_xlu['temp2'] = strategyres['benchmark']
-    cumulativeret_xlu['benchmark'] += cumulativeret_xlu['temp2']
+    cumulativeret_xlu['benchmark'] += cumulativeret_xlu['temp2'] 
     cumulativeret_xlu['temp3'] = strategyres['benchmark2']
-    cumulativeret_xlu['benchmark2'] += cumulativeret_xlu['temp3']    
-            
+    cumulativeret_xlu['benchmark2'] += cumulativeret_xlu['temp3']
+    cumulativeret_xlu['temp4'] = strategyres['returns']*strategyres['position']
+    cumulativeret_xlu['returns'] += cumulativeret_xlu['temp4']
+    
 cumulativeret_xlu['cum_ret'] /= len(set(res_xlu.index.get_level_values('stock')))
 cumulativeret_xlu['benchmark'] /= len(set(res_xlu.index.get_level_values('stock')))
 cumulativeret_xlu['benchmark2'] /= len(set(res_xlu.index.get_level_values('stock')))
+cumulativeret_xlu['returns'] /= len(set(res_xlu.index.get_level_values('stock')))
 
+finalresult_xlu['Average_trade_num'] /= len(set(res_xlu.index.get_level_values('stock')))
+finalresult_xlu['Victory_ratio'] /= len(set(res_xlu.index.get_level_values('stock')))
+finalresult_xlu['Sharpe_ratio'] /= len(set(res_xlu.index.get_level_values('stock')))
+finalresult_xlu['Annualized_return'] /= len(set(res_xlu.index.get_level_values('stock')))
 etf_xlu2 = etf_xlu.copy()[etf_xlu.index>="2010-01-01"]
 etf_xlu2['cum_ret'] = (1+etf_xlu2.returns*np.mean(res_xlu.beta)).cumprod()
-# plot cumulative returns
-plt.plot(cumulativeret_xlu['cum_ret'],label="cumulative_returns")
+# plot cumulative returns and results
+print('------------on the level of average of each stock------------')
+print('Sharpe Ratio:',round(finalresult_xlu['Sharpe_ratio'],2))
+print('Annualized return:{}%'.format(round(finalresult_xlu['Annualized_return']*100,2)))
+print('Victory Ratio:{}%'.format(round(finalresult_xlu['Victory_ratio']*100,2)))
+print('Maximum drop down:{}%'.format(round(finalresult_xlu['Max_drop_down'],2)))
+print('Maximun loss for one single trading:{}%'.format(round(finalresult_xlu['MaxlossOnce']*100,2)))
+print('Monthly average trading times:{}'.format(round(finalresult_xlu['Average_trade_num'] *30,2)))
+print("-------------------------------------------------")
+print('strategy annual return:{}% '.format(100*round(cumulativeret_xlu['cum_ret'][-1]** \
+                                      (252.0/cumulativeret_xlu.shape[0])-1,2)))
+
+print('benchmark annual return:{}% '.format(100*round(cumulativeret_xlu['benchmark'][-1]** \
+                                      (252.0/cumulativeret_xlu.shape[0])-1,2)))
+
+print('strategy Sharpe Ratio:',round(cumulativeret_xlu.returns.mean()/ \
+      cumulativeret_xlu.returns.std()*np.sqrt(252.0),2))
+
+
+print("-------------------------------------------------")
+etf_xlu2 = etf_xlu.copy()[etf_xlu.index>="2010-01-01"]
+etf_xlu2['cum_ret'] = (1+etf_xlu2.returns*np.mean(res_xlu.beta)).cumprod()
+
+plt.plot(cumulativeret_xlu['cum_ret'],label="cumulative returns")
 plt.plot(cumulativeret_xlu['benchmark'],label="benchmark returns")
 plt.plot(cumulativeret_xlu['benchmark2'],label="benchmark returns2")
-plt.plot(etf_xlu2['cum_ret'],label='ETF returns')
+plt.plot(etf_xlu2['cum_ret'],label="ETF returns")
 plt.legend(loc='upper left',fontsize=15)
 plt.title('Utilities: XLU',fontsize=20)
+
+# percentage of stock whose s_score reaches 0.1, which is our open position point
+float(len(res_xlu.s_score[res_xlu.s_score>0.1]))/len(res_xlu.s_score)
+#0.40
 
 #%%
 # Communication Services: IYZ (do not have ETF data)
@@ -1193,10 +1585,19 @@ res_xle = res_xle[res_xle.index.get_level_values('date')>='2010-01-01']
 
 
 # begin strategy
-cumulativeret_xle = pd.DataFrame(index = res_xle.unstack().index,columns=['cum_ret','benchmark','benchmark2'])
+cumulativeret_xle = pd.DataFrame(index = res_xle.unstack().index,columns=['returns','cum_ret','benchmark','benchmark2'])
+cumulativeret_xle['returns'] = 0
 cumulativeret_xle['cum_ret'] = 0
 cumulativeret_xle['benchmark'] = 0
 cumulativeret_xle['benchmark2'] = 0
+finalresult_xle = pd.DataFrame(index = ['strategy'],columns=['Average_trade_num','MaxlossOnce','Max_drop_down','Victory_ratio', \
+                                        'Sharpe_ratio','Annualized_return'])
+finalresult_xle['Average_trade_num'] = 0
+finalresult_xle['MaxlossOnce'] = 0
+finalresult_xle['Max_drop_down'] = 0
+finalresult_xle['Victory_ratio'] = 0
+finalresult_xle['Sharpe_ratio'] = 0
+finalresult_xle['Annualized_return'] = 0
 
 for stock in set(res_xle.index.get_level_values('stock')):
     cur = res_xle[['close','beta','s_score']][res_xle.index.get_level_values('stock')==stock]
@@ -1204,28 +1605,67 @@ for stock in set(res_xle.index.get_level_values('stock')):
     cur = cur.reset_index()
 
     strategyres, transaction = strategy(cur,0.1,0.1,-0.15,-0.2)
-#    finalresult, yearlyresult = performance(transaction,strategyres)
-    strategyres.set_index(strategyres['date'],inplace=True)
+    finalres, yearlyres = performance(transaction, strategyres)
+    finalresult_xle['Average_trade_num'] += finalres['Average_trade_num'][0]
+    finalresult_xle['MaxlossOnce'] = max(finalresult_xle.MaxlossOnce[0],finalres.MaxlossOnce[0])
+    finalresult_xle['Max_drop_down'] = max(finalresult_xle.Max_drop_down[0],finalres.Max_drop_down[0])
+    finalresult_xle['Victory_ratio'] += finalres['Victory_ratio'][0]
+    finalresult_xle['Sharpe_ratio'] += finalres['Sharpe_ratio'][0]
+    finalresult_xle['Annualized_return'] += finalres['Annualized_return'][0]
+    
     cumulativeret_xle['temp1'] = strategyres['cumulative_ret']
     cumulativeret_xle['cum_ret'] += cumulativeret_xle['temp1']
     cumulativeret_xle['temp2'] = strategyres['benchmark']
-    cumulativeret_xle['benchmark'] += cumulativeret_xle['temp2']
+    cumulativeret_xle['benchmark'] += cumulativeret_xle['temp2'] 
     cumulativeret_xle['temp3'] = strategyres['benchmark2']
     cumulativeret_xle['benchmark2'] += cumulativeret_xle['temp3']
-            
+    cumulativeret_xle['temp4'] = strategyres['returns']*strategyres['position']
+    cumulativeret_xle['returns'] += cumulativeret_xle['temp4']
+    
 cumulativeret_xle['cum_ret'] /= len(set(res_xle.index.get_level_values('stock')))
 cumulativeret_xle['benchmark'] /= len(set(res_xle.index.get_level_values('stock')))
 cumulativeret_xle['benchmark2'] /= len(set(res_xle.index.get_level_values('stock')))
+cumulativeret_xle['returns'] /= len(set(res_xle.index.get_level_values('stock')))
 
+finalresult_xle['Average_trade_num'] /= len(set(res_xle.index.get_level_values('stock')))
+finalresult_xle['Victory_ratio'] /= len(set(res_xle.index.get_level_values('stock')))
+finalresult_xle['Sharpe_ratio'] /= len(set(res_xle.index.get_level_values('stock')))
+finalresult_xle['Annualized_return'] /= len(set(res_xle.index.get_level_values('stock')))
 etf_xle2 = etf_xle.copy()[etf_xle.index>="2010-01-01"]
 etf_xle2['cum_ret'] = (1+etf_xle2.returns*np.mean(res_xle.beta)).cumprod()
-# plot cumulative returns
-plt.plot(cumulativeret_xle['cum_ret'],label="cumulative_returns")
+# plot cumulative returns and results
+print('------------on the level of average of each stock------------')
+print('Sharpe Ratio:',round(finalresult_xle['Sharpe_ratio'],2))
+print('Annualized return:{}%'.format(round(finalresult_xle['Annualized_return']*100,2)))
+print('Victory Ratio:{}%'.format(round(finalresult_xle['Victory_ratio']*100,2)))
+print('Maximum drop down:{}%'.format(round(finalresult_xle['Max_drop_down'],2)))
+print('Maximun loss for one single trading:{}%'.format(round(finalresult_xle['MaxlossOnce']*100,2)))
+print('Monthly average trading times:{}'.format(round(finalresult_xle['Average_trade_num'] *30,2)))
+print("-------------------------------------------------")
+print('strategy annual return:{}% '.format(100*round(cumulativeret_xle['cum_ret'][-1]** \
+                                      (252.0/cumulativeret_xle.shape[0])-1,2)))
+
+print('benchmark annual return:{}% '.format(100*round(cumulativeret_xle['benchmark'][-1]** \
+                                      (252.0/cumulativeret_xle.shape[0])-1,2)))
+
+print('strategy Sharpe Ratio:',round(cumulativeret_xle.returns.mean()/ \
+      cumulativeret_xle.returns.std()*np.sqrt(252.0),2))
+
+
+print("-------------------------------------------------")
+etf_xle2 = etf_xle.copy()[etf_xle.index>="2010-01-01"]
+etf_xle2['cum_ret'] = (1+etf_xle2.returns*np.mean(res_xle.beta)).cumprod()
+
+plt.plot(cumulativeret_xle['cum_ret'],label="cumulative returns")
 plt.plot(cumulativeret_xle['benchmark'],label="benchmark returns")
 plt.plot(cumulativeret_xle['benchmark2'],label="benchmark returns2")
-plt.plot(etf_xle2['cum_ret'],label='ETF returns')
+plt.plot(etf_xle2['cum_ret'],label="ETF returns")
 plt.legend(loc='upper left',fontsize=15)
 plt.title('Energy: XLE',fontsize=20)
+
+# percentage of stock whose s_score reaches 0.1, which is our open position point
+float(len(res_xle.s_score[res_xle.s_score>0.1]))/len(res_xle.s_score)
+#0.41
 
 #%%
 # Industrials: XLI 
@@ -1323,10 +1763,19 @@ res_xli = res_xli[res_xli.index.get_level_values('date')>='2010-01-01']
 
 
 # begin strategy
-cumulativeret_xli = pd.DataFrame(index = res_xli.unstack().index,columns=['cum_ret','benchmark','benchmark2'])
+cumulativeret_xli = pd.DataFrame(index = res_xli.unstack().index,columns=['returns','cum_ret','benchmark','benchmark2'])
+cumulativeret_xli['returns'] = 0
 cumulativeret_xli['cum_ret'] = 0
 cumulativeret_xli['benchmark'] = 0
 cumulativeret_xli['benchmark2'] = 0
+finalresult_xli = pd.DataFrame(index = ['strategy'],columns=['Average_trade_num','MaxlossOnce','Max_drop_down','Victory_ratio', \
+                                        'Sharpe_ratio','Annualized_return'])
+finalresult_xli['Average_trade_num'] = 0
+finalresult_xli['MaxlossOnce'] = 0
+finalresult_xli['Max_drop_down'] = 0
+finalresult_xli['Victory_ratio'] = 0
+finalresult_xli['Sharpe_ratio'] = 0
+finalresult_xli['Annualized_return'] = 0
 
 for stock in set(res_xli.index.get_level_values('stock')):
     cur = res_xli[['close','beta','s_score']][res_xli.index.get_level_values('stock')==stock]
@@ -1334,28 +1783,67 @@ for stock in set(res_xli.index.get_level_values('stock')):
     cur = cur.reset_index()
 
     strategyres, transaction = strategy(cur,0.1,0.1,-0.15,-0.2)
-#    finalresult, yearlyresult = performance(transaction,strategyres)
-    strategyres.set_index(strategyres['date'],inplace=True)
+    finalres, yearlyres = performance(transaction, strategyres)
+    finalresult_xli['Average_trade_num'] += finalres['Average_trade_num'][0]
+    finalresult_xli['MaxlossOnce'] = max(finalresult_xli.MaxlossOnce[0],finalres.MaxlossOnce[0])
+    finalresult_xli['Max_drop_down'] = max(finalresult_xli.Max_drop_down[0],finalres.Max_drop_down[0])
+    finalresult_xli['Victory_ratio'] += finalres['Victory_ratio'][0]
+    finalresult_xli['Sharpe_ratio'] += finalres['Sharpe_ratio'][0]
+    finalresult_xli['Annualized_return'] += finalres['Annualized_return'][0]
+    
     cumulativeret_xli['temp1'] = strategyres['cumulative_ret']
     cumulativeret_xli['cum_ret'] += cumulativeret_xli['temp1']
     cumulativeret_xli['temp2'] = strategyres['benchmark']
-    cumulativeret_xli['benchmark'] += cumulativeret_xli['temp2']
+    cumulativeret_xli['benchmark'] += cumulativeret_xli['temp2'] 
     cumulativeret_xli['temp3'] = strategyres['benchmark2']
-    cumulativeret_xli['benchmark2'] += cumulativeret_xli['temp3']    
-            
+    cumulativeret_xli['benchmark2'] += cumulativeret_xli['temp3']
+    cumulativeret_xli['temp4'] = strategyres['returns']*strategyres['position']
+    cumulativeret_xli['returns'] += cumulativeret_xli['temp4']
+    
 cumulativeret_xli['cum_ret'] /= len(set(res_xli.index.get_level_values('stock')))
 cumulativeret_xli['benchmark'] /= len(set(res_xli.index.get_level_values('stock')))
 cumulativeret_xli['benchmark2'] /= len(set(res_xli.index.get_level_values('stock')))
+cumulativeret_xli['returns'] /= len(set(res_xli.index.get_level_values('stock')))
 
+finalresult_xli['Average_trade_num'] /= len(set(res_xli.index.get_level_values('stock')))
+finalresult_xli['Victory_ratio'] /= len(set(res_xli.index.get_level_values('stock')))
+finalresult_xli['Sharpe_ratio'] /= len(set(res_xli.index.get_level_values('stock')))
+finalresult_xli['Annualized_return'] /= len(set(res_xli.index.get_level_values('stock')))
 etf_xli2 = etf_xli.copy()[etf_xli.index>="2010-01-01"]
 etf_xli2['cum_ret'] = (1+etf_xli2.returns*np.mean(res_xli.beta)).cumprod()
-# plot cumulative returns
-plt.plot(cumulativeret_xli['cum_ret'],label="cumulative_returns")
+# plot cumulative returns and results
+print('------------on the level of average of each stock------------')
+print('Sharpe Ratio:',round(finalresult_xli['Sharpe_ratio'],2))
+print('Annualized return:{}%'.format(round(finalresult_xli['Annualized_return']*100,2)))
+print('Victory Ratio:{}%'.format(round(finalresult_xli['Victory_ratio']*100,2)))
+print('Maximum drop down:{}%'.format(round(finalresult_xli['Max_drop_down'],2)))
+print('Maximun loss for one single trading:{}%'.format(round(finalresult_xli['MaxlossOnce']*100,2)))
+print('Monthly average trading times:{}'.format(round(finalresult_xli['Average_trade_num'] *30,2)))
+print("-------------------------------------------------")
+print('strategy annual return:{}% '.format(100*round(cumulativeret_xli['cum_ret'][-1]** \
+                                      (252.0/cumulativeret_xli.shape[0])-1,2)))
+
+print('benchmark annual return:{}% '.format(100*round(cumulativeret_xli['benchmark'][-1]** \
+                                      (252.0/cumulativeret_xli.shape[0])-1,2)))
+
+print('strategy Sharpe Ratio:',round(cumulativeret_xli.returns.mean()/ \
+      cumulativeret_xli.returns.std()*np.sqrt(252.0),2))
+
+
+print("-------------------------------------------------")
+etf_xli2 = etf_xli.copy()[etf_xli.index>="2010-01-01"]
+etf_xli2['cum_ret'] = (1+etf_xli2.returns*np.mean(res_xli.beta)).cumprod()
+
+plt.plot(cumulativeret_xli['cum_ret'],label="cumulative returns")
 plt.plot(cumulativeret_xli['benchmark'],label="benchmark returns")
 plt.plot(cumulativeret_xli['benchmark2'],label="benchmark returns2")
-plt.plot(etf_xli2['cum_ret'],label='ETF returns')
+plt.plot(etf_xli2['cum_ret'],label="ETF returns")
 plt.legend(loc='upper left',fontsize=15)
 plt.title('Industrials: XLI',fontsize=20)
+
+# percentage of stock whose s_score reaches 0.1, which is our open position point
+float(len(res_xli.s_score[res_xli.s_score>0.1]))/len(res_xli.s_score)
+#0.38
 
 #%%
 # Technology: XLK 
@@ -1453,10 +1941,19 @@ res_xlk = res_xlk[res_xlk.index.get_level_values('date')>='2010-01-01']
 
 
 # begin strategy
-cumulativeret_xlk = pd.DataFrame(index = res_xlk.unstack().index,columns=['cum_ret','benchmark','benchmark2'])
+cumulativeret_xlk = pd.DataFrame(index = res_xlk.unstack().index,columns=['returns','cum_ret','benchmark','benchmark2'])
+cumulativeret_xlk['returns'] = 0
 cumulativeret_xlk['cum_ret'] = 0
 cumulativeret_xlk['benchmark'] = 0
 cumulativeret_xlk['benchmark2'] = 0
+finalresult_xlk = pd.DataFrame(index = ['strategy'],columns=['Average_trade_num','MaxlossOnce','Max_drop_down','Victory_ratio', \
+                                        'Sharpe_ratio','Annualized_return'])
+finalresult_xlk['Average_trade_num'] = 0
+finalresult_xlk['MaxlossOnce'] = 0
+finalresult_xlk['Max_drop_down'] = 0
+finalresult_xlk['Victory_ratio'] = 0
+finalresult_xlk['Sharpe_ratio'] = 0
+finalresult_xlk['Annualized_return'] = 0
 
 for stock in set(res_xlk.index.get_level_values('stock')):
     cur = res_xlk[['close','beta','s_score']][res_xlk.index.get_level_values('stock')==stock]
@@ -1464,32 +1961,106 @@ for stock in set(res_xlk.index.get_level_values('stock')):
     cur = cur.reset_index()
 
     strategyres, transaction = strategy(cur,0.1,0.1,-0.15,-0.2)
-#    finalresult, yearlyresult = performance(transaction,strategyres)
-    strategyres.set_index(strategyres['date'],inplace=True)
+    finalres, yearlyres = performance(transaction, strategyres)
+    finalresult_xlk['Average_trade_num'] += finalres['Average_trade_num'][0]
+    finalresult_xlk['MaxlossOnce'] = max(finalresult_xlk.MaxlossOnce[0],finalres.MaxlossOnce[0])
+    finalresult_xlk['Max_drop_down'] = max(finalresult_xlk.Max_drop_down[0],finalres.Max_drop_down[0])
+    finalresult_xlk['Victory_ratio'] += finalres['Victory_ratio'][0]
+    finalresult_xlk['Sharpe_ratio'] += finalres['Sharpe_ratio'][0]
+    finalresult_xlk['Annualized_return'] += finalres['Annualized_return'][0]
+    
     cumulativeret_xlk['temp1'] = strategyres['cumulative_ret']
     cumulativeret_xlk['cum_ret'] += cumulativeret_xlk['temp1']
     cumulativeret_xlk['temp2'] = strategyres['benchmark']
-    cumulativeret_xlk['benchmark'] += cumulativeret_xlk['temp2']
+    cumulativeret_xlk['benchmark'] += cumulativeret_xlk['temp2'] 
     cumulativeret_xlk['temp3'] = strategyres['benchmark2']
-    cumulativeret_xlk['benchmark2'] += cumulativeret_xlk['temp3']  
-            
+    cumulativeret_xlk['benchmark2'] += cumulativeret_xlk['temp3']
+    cumulativeret_xlk['temp4'] = strategyres['returns']*strategyres['position']
+    cumulativeret_xlk['returns'] += cumulativeret_xlk['temp4']
+    
 cumulativeret_xlk['cum_ret'] /= len(set(res_xlk.index.get_level_values('stock')))
 cumulativeret_xlk['benchmark'] /= len(set(res_xlk.index.get_level_values('stock')))
 cumulativeret_xlk['benchmark2'] /= len(set(res_xlk.index.get_level_values('stock')))
+cumulativeret_xlk['returns'] /= len(set(res_xlk.index.get_level_values('stock')))
 
+finalresult_xlk['Average_trade_num'] /= len(set(res_xlk.index.get_level_values('stock')))
+finalresult_xlk['Victory_ratio'] /= len(set(res_xlk.index.get_level_values('stock')))
+finalresult_xlk['Sharpe_ratio'] /= len(set(res_xlk.index.get_level_values('stock')))
+finalresult_xlk['Annualized_return'] /= len(set(res_xlk.index.get_level_values('stock')))
 etf_xlk2 = etf_xlk.copy()[etf_xlk.index>="2010-01-01"]
 etf_xlk2['cum_ret'] = (1+etf_xlk2.returns*np.mean(res_xlk.beta)).cumprod()
-# plot cumulative returns
-plt.plot(cumulativeret_xlk['cum_ret'],label="cumulative_returns")
+# plot cumulative returns and results
+print('------------on the level of average of each stock------------')
+print('Sharpe Ratio:',round(finalresult_xlk['Sharpe_ratio'],2))
+print('Annualized return:{}%'.format(round(finalresult_xlk['Annualized_return']*100,2)))
+print('Victory Ratio:{}%'.format(round(finalresult_xlk['Victory_ratio']*100,2)))
+print('Maximum drop down:{}%'.format(round(finalresult_xlk['Max_drop_down'],2)))
+print('Maximun loss for one single trading:{}%'.format(round(finalresult_xlk['MaxlossOnce']*100,2)))
+print('Monthly average trading times:{}'.format(round(finalresult_xlk['Average_trade_num'] *30,2)))
+print("-------------------------------------------------")
+print('strategy annual return:{}% '.format(100*round(cumulativeret_xlk['cum_ret'][-1]** \
+                                      (252.0/cumulativeret_xlk.shape[0])-1,2)))
+
+print('benchmark annual return:{}% '.format(100*round(cumulativeret_xlk['benchmark'][-1]** \
+                                      (252.0/cumulativeret_xlk.shape[0])-1,2)))
+
+print('strategy Sharpe Ratio:',round(cumulativeret_xlk.returns.mean()/ \
+      cumulativeret_xlk.returns.std()*np.sqrt(252.0),2))
+
+
+print("-------------------------------------------------")
+etf_xlk2 = etf_xlk.copy()[etf_xlk.index>="2010-01-01"]
+etf_xlk2['cum_ret'] = (1+etf_xlk2.returns*np.mean(res_xlk.beta)).cumprod()
+
+plt.plot(cumulativeret_xlk['cum_ret'],label="cumulative returns")
 plt.plot(cumulativeret_xlk['benchmark'],label="benchmark returns")
 plt.plot(cumulativeret_xlk['benchmark2'],label="benchmark returns2")
-plt.plot(etf_xlk2['cum_ret'],label='ETF returns')
+plt.plot(etf_xlk2['cum_ret'],label="ETF returns")
 plt.legend(loc='upper left',fontsize=15)
 plt.title('Technology: XLK',fontsize=20)
 
+# percentage of stock whose s_score reaches 0.1, which is our open position point
+float(len(res_xlk.s_score[res_xlk.s_score>0.1]))/len(res_xlk.s_score)
+#0.40
+
 #%%
+# Test for multicollinearity of ETFs in different sector
+
+stock = newdata[['close','stock']]
+
+stock = stock.set_index([stock.index,stock.stock])
+stock = stock.unstack().dropna(axis=1,how='any').stack()
+stock = stock[['close']]
+delta = stock.unstack().pct_change().shift(-2)
+stock['returns'] = delta.stack()
 
 
+temp_ = stock[['returns']].unstack()
+temp_['etf_xlk'] = etf_xlk.returns
+temp_['etf_xlb'] = etf_xlb.returns
+temp_['etf_xly'] = etf_xly.returns
+temp_['etf_xlp'] = etf_xlp.returns
+temp_['etf_iyr'] = etf_iyr.returns
+temp_['etf_xlv'] = etf_xlv.returns
+temp_['etf_xlu'] = etf_xlu.returns
+temp_['etf_xle'] = etf_xle.returns
+temp_['etf_xli'] = etf_xli.returns
+temp_['etf_xlk'] = etf_xlk.returns
+
+temp_ = temp_.dropna(axis = 0, how='any')
+
+from statsmodels.stats.outliers_influence import variance_inflation_factor
+X = temp_.iloc[:,-9:]
+vif = pd.DataFrame()
+vif["VIF Factor"] = [variance_inflation_factor(X.values, i) for i in range(X.shape[1])]
+vif["features"] = X.columns
+
+'''
+we can see that the VIF for all the ETFs is less than 10, 
+and that means we can properly assume all the ETF returns are independent. 
+Therefore, for future study, we can use these 10 ETFs to be the 10 market risk 
+factors.
+'''
 
 
 
