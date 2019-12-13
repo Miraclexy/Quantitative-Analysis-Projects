@@ -15,3 +15,18 @@ Analyze the relationship between moving average with different rolling window pe
 
 Produce Gaussian Hidden Markov model to predict hidden states of financial market; select and standardize characteristic variables using Box-Cox transformation; test model suitability among large cap stock, small cap stock and financial blue chip stock; 
 initiated Kalman Filter model to optimize performance of HMM model by solving the problem of high noises in financial data; performed out-of-sample empirical analysis through Kalman+HMM combination model based on the SSE 50 index
+
+5. statistical arbitrage in the U.S equity market
+
+Divide stock pool of S&P500 components into different groups based on sectors.
+For each sector:
+
+(1): use ETF in this sector as market risk factor
+
+(2): use stocks’ daily returns data to do OLS regression on corresponding ETF’s daily returns; get correlation beta and residual. Assume that the residual we get in the last process follows mean reverting O-U process, so we use test data to get the parameters in O-U process. In discrete time, O-U process becomes AR(1) model, so in practice, we use AR(1) model.
+
+(3): use test data in order to get parameters in O-U process and get s_score which is the trading signal.
+
+(4): define trading strategy. Calculate cumulative returns and benchmark’s cumulative returns.
+
+(5) plot the cumulative returns.
