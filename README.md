@@ -33,7 +33,7 @@ For each sector:
 
 6. frequency arbitrage
 
-Construct two portfolios trading options and delta hedge daily and weekly respectively based on the difference of the volatility signature of underlying asset withP differenct time intervals;
+Construct two portfolios trading options and delta hedge daily and weekly respectively based on the difference of the volatility signature of underlying asset with different time intervals;
 
 Prove that we can only trade on the underlying asset to replicate the whole strategy by introducing log contract whose payoff is the log of St.
 
