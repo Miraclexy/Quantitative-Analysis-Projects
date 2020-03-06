@@ -30,3 +30,11 @@ For each sector:
 (4): define trading strategy. Calculate cumulative returns and benchmark’s cumulative returns.
 
 (5) plot the cumulative returns.
+
+6. frequency arbitrage
+
+Construct two portfolios trading options and delta hedge daily and weekly respectively based on the difference of the volatility signature of underlying asset with different time intervals;
+
+Prove that we can only trade on the underlying asset to replicate the whole strategy by introducing log contract whose payoff is the log of St.
+
+
