@@ -37,4 +37,8 @@ Construct two portfolios trading options and delta hedge daily and weekly respec
 
 Prove that we can only trade on the underlying asset to replicate the whole strategy by introducing log contract whose payoff is the log of St.
 
+7. fractional brownian motion & hurst exponent
+
+Assume Stock price follows Fractional Brownian motion with a Hurst exponent rather than Geometric Brownian motion, and find out the market feature(momentum/mean reverting/Brownian motion) based on the relationship between H and 0.5; try practical method to estimate Hurst exponent.
+
 
