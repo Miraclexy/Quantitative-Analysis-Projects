@@ -43,4 +43,4 @@ Assume Stock price follows Fractional Brownian motion with a Hurst exponent rath
 
 **8. hedge ratios for spread trading**
 
-Show the potential problem about calculation hedge ratio in spread trading using OLS regression and point out a better way to do that which makes the hedge ratio symmetrica.
+Show the potential problem when calculating hedge ratio in spread trading using OLS regression and point out a better way to do that which makes the hedge ratio symmetrica.
