@@ -41,4 +41,6 @@ Prove that we can only trade on the underlying asset to replicate the whole stra
 
 Assume Stock price follows Fractional Brownian motion with a Hurst exponent rather than Geometric Brownian motion, and find out the market feature(momentum/mean reverting/Brownian motion) based on the relationship between H and 0.5; try practical method to estimate Hurst exponent.
 
+8. hedge ratios for spread trading
 
+Show the potential problem about calculation hedge ratio in spread trading using OLS regression and point out a better way to do that which makes the hedge ratio symmetrica.
