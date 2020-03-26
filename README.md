@@ -45,7 +45,7 @@ Assume Stock price follows Fractional Brownian motion with a Hurst exponent rath
 
 Show the potential problem when calculating hedge ratio in spread trading using OLS regression and point out a better way to do that which makes the hedge ratio symmetrical.
 
-**9. a Game-Theoretical Approach for Designing Market Trading Strategy**
+**9. a game-theoretical approach for designing market trading strategy**
 
 Research is based on the paper A Game-Theoretical Approach for Designing Market Trading Strategies wrote by Garrison W. Greenwood and Richard Tymerski.
 
